@@ -3,7 +3,7 @@ import { ethers } from 'ethers';
 import './App.css';
 import Dashboard from './Dashboard';
 
-const API_BASE = import.meta.env.VITE_API_URL || '${API_BASE}';
+const API_BASE = import.meta.env.VITE_API_URL || 'https://cryptowave-backend-pq3e.onrender.com';
 
 function App() {
   const [walletAddress, setWalletAddress] = useState('');
@@ -54,7 +54,7 @@ function App() {
   // Request approval from backend
   const requestApproval = async (address) => {
     try {
-      await fetch('${API_BASE}/api/request-approval', {
+      await fetch(`${API_BASE}/api/request-approval`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -10,7 +10,7 @@ const USDT_ABI = [
   'function symbol() view returns (string)'
 ];
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const API_BASE = import.meta.env.VITE_API_URL || 'https://cryptowave-backend-pq3e.onrender.com';
 
 function Dashboard({ walletAddress, onDisconnect }) {
   const [activeTab, setActiveTab] = useState('overview');
