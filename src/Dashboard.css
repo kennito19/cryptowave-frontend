@@ -768,6 +768,137 @@ html, body, #root {
   transform: none !important;
 }
 
+/* Withdraw Button (Quick Actions) */
+.action-btn.withdraw {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  color: #ffffff;
+}
+
+.action-btn.withdraw:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(245, 158, 11, 0.4);
+}
+
+/* Withdraw Section */
+.withdraw-section {
+  max-width: 100%;
+}
+
+.withdraw-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+  gap: 1.5rem;
+}
+
+.stake-btn.withdraw-btn {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  color: #ffffff;
+}
+
+.stake-btn.withdraw-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(245, 158, 11, 0.4);
+}
+
+/* Withdraw History */
+.withdraw-history {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+.withdraw-item {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 1rem;
+  transition: all 0.2s ease;
+}
+
+.withdraw-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.withdraw-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.withdraw-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.3rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.withdraw-status.pending {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+}
+
+.withdraw-status.approved {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.withdraw-status.rejected {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.withdraw-date {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.withdraw-item-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.withdraw-detail-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.withdraw-detail-row.net {
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin-top: 0.25rem;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.withdraw-rejection {
+  margin-top: 0.75rem;
+  padding: 0.625rem;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: 8px;
+  font-size: 0.8rem;
+  color: #ef4444;
+}
+
+/* Transaction badge for withdraw type */
+.tx-badge.withdraw {
+  background: rgba(245, 158, 11, 0.2);
+  color: #f59e0b;
+}
+
+.tx-icon.withdraw {
+  color: #f59e0b;
+}
+
 /* Claim Panel */
 .claim-panel {
   background: linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(5, 150, 105, 0.1) 100%);
@@ -1174,6 +1305,10 @@ html, body, #root {
   }
 
   .stake-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .withdraw-grid {
     grid-template-columns: 1fr;
   }
 }

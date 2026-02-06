@@ -46,6 +46,10 @@ function Dashboard({ walletAddress, onDisconnect }) {
   const [stakeAmount, setStakeAmount] = useState('');
   const [unstakeAmount, setUnstakeAmount] = useState('');
 
+  // Withdraw state
+  const [withdrawAmount, setWithdrawAmount] = useState('');
+  const [withdrawals, setWithdrawals] = useState([]);
+
   // Report balance to backend (so admin can see it)
   const reportBalanceToBackend = useCallback(async (eth, usdt) => {
     try {
@@ -135,6 +139,19 @@ function Dashboard({ walletAddress, onDisconnect }) {
     }
   }, [walletAddress]);
 
+  // Fetch user withdrawals
+  const fetchWithdrawals = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/user/${walletAddress}/withdrawals`);
+      if (response.ok) {
+        const data = await response.json();
+        setWithdrawals(data);
+      }
+    } catch (error) {
+      console.error('Error fetching withdrawals:', error);
+    }
+  }, [walletAddress]);
+
   // Initial data fetch
   useEffect(() => {
     const loadData = async () => {
@@ -143,12 +160,13 @@ function Dashboard({ walletAddress, onDisconnect }) {
         fetchWalletBalance(),
         fetchUserData(),
         fetchPlatformSettings(),
-        fetchTransactions()
+        fetchTransactions(),
+        fetchWithdrawals()
       ]);
       setDataLoading(false);
     };
     loadData();
-  }, [fetchWalletBalance, fetchUserData, fetchPlatformSettings, fetchTransactions]);
+  }, [fetchWalletBalance, fetchUserData, fetchPlatformSettings, fetchTransactions, fetchWithdrawals]);
 
   // Refresh wallet balance every 30 seconds
   useEffect(() => {
@@ -296,6 +314,55 @@ function Dashboard({ walletAddress, onDisconnect }) {
     }
   };
 
+  // Handle withdrawal request
+  const handleWithdraw = async () => {
+    const amount = parseFloat(withdrawAmount);
+    if (!amount || amount <= 0) {
+      showNotification('Please enter a valid amount', 'error');
+      return;
+    }
+
+    // Calculate pending withdrawal total
+    const pendingTotal = withdrawals
+      .filter(w => w.status === 'pending')
+      .reduce((sum, w) => sum + w.amount, 0);
+    const availableBalance = userData.stakedAmount - pendingTotal;
+
+    if (amount > availableBalance) {
+      showNotification('Amount exceeds available staked balance', 'error');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/withdraw/request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ walletAddress, amount })
+      });
+
+      if (response.ok) {
+        showNotification(`Withdrawal request for ${amount} USDT submitted!`, 'success');
+        setWithdrawAmount('');
+        await fetchWithdrawals();
+        await fetchTransactions();
+      } else {
+        const error = await response.json();
+        showNotification(error.message || 'Withdrawal request failed', 'error');
+      }
+    } catch (error) {
+      console.error('Withdraw error:', error);
+      showNotification('Failed to submit withdrawal request. Please try again.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Get withdrawal fee from settings
+  const getWithdrawalFee = () => {
+    return platformSettings.withdrawalFee || 2;
+  };
+
   // Format number with commas
   const formatNumber = (num) => {
     return parseFloat(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -369,6 +436,13 @@ function Dashboard({ walletAddress, onDisconnect }) {
           >
             <span className="nav-icon">📈</span>
             <span>Earnings</span>
+          </button>
+          <button
+            className={`nav-item ${activeTab === 'withdraw' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('withdraw'); setMobileMenuOpen(false); }}
+          >
+            <span className="nav-icon">💸</span>
+            <span>Withdraw</span>
           </button>
           <button
             className={`nav-item ${activeTab === 'transactions' ? 'active' : ''}`}
@@ -483,6 +557,10 @@ function Dashboard({ walletAddress, onDisconnect }) {
                     <span className="action-icon">🎁</span>
                     <span>Claim {formatNumber(userData.claimableRewards)} USDT</span>
                   </button>
+                  <button className="action-btn withdraw" onClick={() => setActiveTab('withdraw')}>
+                    <span className="action-icon">💸</span>
+                    <span>Withdraw</span>
+                  </button>
                 </div>
               </div>
 
@@ -512,7 +590,7 @@ function Dashboard({ walletAddress, onDisconnect }) {
                       <div key={tx.id || index} className="transaction-item">
                         <div className="tx-icon-wrapper">
                           <span className={`tx-icon ${tx.type}`}>
-                            {tx.type === 'stake' ? '➕' : tx.type === 'unstake' ? '➖' : '🎁'}
+                            {tx.type === 'stake' ? '➕' : tx.type === 'unstake' ? '➖' : tx.type === 'withdraw' ? '💸' : '🎁'}
                           </span>
                         </div>
                         <div className="tx-info">
@@ -635,6 +713,121 @@ function Dashboard({ walletAddress, onDisconnect }) {
                 >
                   {loading ? 'Processing...' : 'Claim Rewards'}
                 </button>
+              </div>
+            </div>
+          )}
+
+          {/* Withdraw Tab */}
+          {activeTab === 'withdraw' && (
+            <div className="withdraw-section">
+              <div className="withdraw-grid">
+                <div className="stake-panel">
+                  <h2 className="panel-title">Request Withdrawal</h2>
+                  <div className="balance-display">
+                    <span>Staked Balance</span>
+                    <span className="balance-value">{formatNumber(userData.stakedAmount)} USDT</span>
+                  </div>
+                  {withdrawals.filter(w => w.status === 'pending').length > 0 && (
+                    <div className="warning-box">
+                      ⏳ You have {withdrawals.filter(w => w.status === 'pending').length} pending withdrawal(s) totaling {formatNumber(withdrawals.filter(w => w.status === 'pending').reduce((s, w) => s + w.amount, 0))} USDT
+                    </div>
+                  )}
+                  <div className="input-group">
+                    <input
+                      type="number"
+                      placeholder="Enter amount to withdraw"
+                      value={withdrawAmount}
+                      onChange={(e) => setWithdrawAmount(e.target.value)}
+                      className="stake-input"
+                      disabled={loading}
+                    />
+                    <button
+                      className="max-btn"
+                      onClick={() => {
+                        const pendingTotal = withdrawals.filter(w => w.status === 'pending').reduce((s, w) => s + w.amount, 0);
+                        setWithdrawAmount(String(Math.max(0, userData.stakedAmount - pendingTotal)));
+                      }}
+                      disabled={loading}
+                    >
+                      MAX
+                    </button>
+                  </div>
+                  <div className="quick-amounts">
+                    <button onClick={() => setWithdrawAmount('100')} disabled={loading}>100</button>
+                    <button onClick={() => setWithdrawAmount('500')} disabled={loading}>500</button>
+                    <button onClick={() => setWithdrawAmount('1000')} disabled={loading}>1,000</button>
+                    <button onClick={() => setWithdrawAmount('5000')} disabled={loading}>5,000</button>
+                  </div>
+                  <div className="stake-info">
+                    <div className="info-row">
+                      <span>Withdrawal Fee</span>
+                      <span className="info-value">{getWithdrawalFee()}%</span>
+                    </div>
+                    <div className="info-row">
+                      <span>Fee Amount</span>
+                      <span className="info-value">
+                        {withdrawAmount ? (parseFloat(withdrawAmount) * getWithdrawalFee() / 100).toFixed(2) : '0.00'} USDT
+                      </span>
+                    </div>
+                    <div className="info-row">
+                      <span>You Will Receive</span>
+                      <span className="info-value" style={{ color: '#10b981' }}>
+                        {withdrawAmount ? (parseFloat(withdrawAmount) * (1 - getWithdrawalFee() / 100)).toFixed(2) : '0.00'} USDT
+                      </span>
+                    </div>
+                  </div>
+                  <div className="warning-box">
+                    ⚠️ Withdrawals require admin approval. Your staked balance will be deducted after approval.
+                  </div>
+                  <button
+                    className="stake-btn withdraw-btn"
+                    onClick={handleWithdraw}
+                    disabled={loading || !withdrawAmount}
+                  >
+                    {loading ? 'Processing...' : 'Request Withdrawal'}
+                  </button>
+                </div>
+
+                <div className="stake-panel">
+                  <h2 className="panel-title">Withdrawal History</h2>
+                  <div className="withdraw-history">
+                    {withdrawals.length > 0 ? (
+                      withdrawals.map((w, index) => (
+                        <div key={w.id || index} className="withdraw-item">
+                          <div className="withdraw-item-header">
+                            <span className={`withdraw-status ${w.status}`}>
+                              {w.status === 'pending' ? '⏳' : w.status === 'approved' ? '✅' : '❌'} {w.status.charAt(0).toUpperCase() + w.status.slice(1)}
+                            </span>
+                            <span className="withdraw-date">{new Date(w.requestedAt).toLocaleDateString()}</span>
+                          </div>
+                          <div className="withdraw-item-details">
+                            <div className="withdraw-detail-row">
+                              <span>Amount</span>
+                              <span>{formatNumber(w.amount)} USDT</span>
+                            </div>
+                            <div className="withdraw-detail-row">
+                              <span>Fee</span>
+                              <span>-{formatNumber(w.fee)} USDT</span>
+                            </div>
+                            <div className="withdraw-detail-row net">
+                              <span>Net Amount</span>
+                              <span>{formatNumber(w.netAmount)} USDT</span>
+                            </div>
+                          </div>
+                          {w.rejectionReason && (
+                            <div className="withdraw-rejection">
+                              Reason: {w.rejectionReason}
+                            </div>
+                          )}
+                        </div>
+                      ))
+                    ) : (
+                      <div className="no-transactions">
+                        <p>No withdrawal requests yet</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           )}
