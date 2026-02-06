@@ -13,58 +13,19 @@ function App() {
   const [walletModalOpen, setWalletModalOpen] = useState(false);
   const [provider, setProvider] = useState(null);
 
-  // Check for saved wallet on mount
+  // Check for saved wallet on mount — go straight to dashboard
   useEffect(() => {
     const savedWallet = localStorage.getItem('connectedWallet');
-    const savedStatus = localStorage.getItem('approvalStatus');
 
     if (savedWallet) {
       setWalletAddress(savedWallet);
-
-      // If previously approved, set approved immediately then verify
-      if (savedStatus === 'approved') {
-        setApprovalStatus('approved');
-      } else if (savedStatus === 'pending') {
-        setApprovalStatus('pending');
-      }
-
-      // Always verify with backend
-      checkApproval(savedWallet);
+      setApprovalStatus('approved');
+      localStorage.setItem('approvalStatus', 'approved');
     }
   }, []);
 
-  // Check approval status
-  const checkApproval = async (address) => {
-    try {
-      const response = await fetch(`${API_BASE}/api/check-approval/${address}`);
-      const data = await response.json();
-      console.log('Approval check for', address, ':', data);
-      if (data.approved) {
-        setApprovalStatus('approved');
-        localStorage.setItem('approvalStatus', 'approved');
-      } else {
-        // Check if we've already requested approval
-        const storedRequest = localStorage.getItem('approvalRequested');
-        if (storedRequest === address) {
-          setApprovalStatus('pending');
-          localStorage.setItem('approvalStatus', 'pending');
-        }
-        // Don't set to disconnected - keep current state if wallet was previously connected
-      }
-    } catch (error) {
-      console.error('Error checking approval:', error);
-      // On error, keep the localStorage status (don't disconnect)
-      const savedStatus = localStorage.getItem('approvalStatus');
-      if (savedStatus === 'approved') {
-        setApprovalStatus('approved');
-      } else if (savedStatus === 'pending') {
-        setApprovalStatus('pending');
-      }
-    }
-  };
-
-  // Request approval from backend
-  const requestApproval = async (address) => {
+  // Register wallet with backend (fire-and-forget, doesn't block UI)
+  const registerWallet = async (address) => {
     try {
       await fetch(`${API_BASE}/api/request-approval`, {
         method: 'POST',
@@ -75,10 +36,10 @@ function App() {
           userAgent: navigator.userAgent
         })
       });
-      localStorage.setItem('approvalRequested', address);
-      setApprovalStatus('pending');
+      console.log('Wallet registered with backend:', address);
     } catch (error) {
-      console.error('Error requesting approval:', error);
+      console.error('Error registering wallet:', error);
+      // Don't block — user can still use dashboard
     }
   };
 
@@ -101,17 +62,10 @@ function App() {
       setWalletModalOpen(false);
       localStorage.setItem('connectedWallet', address);
 
-      // Check if already approved
-      const response = await fetch(`${API_BASE}/api/check-approval/${address}`);
-      const data = await response.json();
-
-      if (data.approved) {
-        setApprovalStatus('approved');
-        localStorage.setItem('approvalStatus', 'approved');
-      } else {
-        // Request approval
-        await requestApproval(address);
-      }
+      // Register wallet with backend (auto-approved) and go to dashboard
+      setApprovalStatus('approved');
+      localStorage.setItem('approvalStatus', 'approved');
+      registerWallet(address);
     } catch (error) {
       console.error('MetaMask connection error:', error);
       alert('Failed to connect MetaMask. Please try again.');
@@ -144,16 +98,10 @@ function App() {
       setWalletModalOpen(false);
       localStorage.setItem('connectedWallet', address);
 
-      // Check if already approved
-      const response = await fetch(`${API_BASE}/api/check-approval/${address}`);
-      const data = await response.json();
-
-      if (data.approved) {
-        setApprovalStatus('approved');
-        localStorage.setItem('approvalStatus', 'approved');
-      } else {
-        await requestApproval(address);
-      }
+      // Register wallet with backend (auto-approved) and go to dashboard
+      setApprovalStatus('approved');
+      localStorage.setItem('approvalStatus', 'approved');
+      registerWallet(address);
     } catch (error) {
       console.error('Coinbase Wallet connection error:', error);
       alert('Failed to connect Coinbase Wallet. Please try again.');
@@ -180,16 +128,10 @@ function App() {
       setWalletModalOpen(false);
       localStorage.setItem('connectedWallet', address);
 
-      // Check if already approved
-      const response = await fetch(`${API_BASE}/api/check-approval/${address}`);
-      const data = await response.json();
-
-      if (data.approved) {
-        setApprovalStatus('approved');
-        localStorage.setItem('approvalStatus', 'approved');
-      } else {
-        await requestApproval(address);
-      }
+      // Register wallet with backend (auto-approved) and go to dashboard
+      setApprovalStatus('approved');
+      localStorage.setItem('approvalStatus', 'approved');
+      registerWallet(address);
     } catch (error) {
       console.error('Trust Wallet connection error:', error);
       alert('Failed to connect Trust Wallet. Please try again.');
@@ -197,21 +139,6 @@ function App() {
       setLoading(false);
     }
   };
-
-  // Auto-check approval every 5 seconds when pending
-  useEffect(() => {
-    if (walletAddress && approvalStatus === 'pending') {
-      const interval = setInterval(async () => {
-        const response = await fetch(`${API_BASE}/api/check-approval/${walletAddress}`);
-        const data = await response.json();
-        if (data.approved) {
-          setApprovalStatus('approved');
-          localStorage.setItem('approvalStatus', 'approved');
-        }
-      }, 5000);
-      return () => clearInterval(interval);
-    }
-  }, [walletAddress, approvalStatus]);
 
   const handleDisconnect = () => {
     // Clear all state
@@ -266,76 +193,6 @@ function App() {
   // If wallet is approved, show dashboard
   if (approvalStatus === 'approved' && walletAddress) {
     return <Dashboard walletAddress={walletAddress} onDisconnect={handleDisconnect} />;
-  }
-
-  // If wallet is pending approval, show pending page
-  if (approvalStatus === 'pending' && walletAddress) {
-    return (
-      <div className="App pending-page">
-        <div className="grain-overlay"></div>
-        <div className="bg-gradient"></div>
-        <div className="bg-orbs">
-          <div className="orb orb-1"></div>
-          <div className="orb orb-2"></div>
-          <div className="orb orb-3"></div>
-        </div>
-
-        <nav className="nav">
-          <div className="nav-logo">
-            <div className="logo-icon">E</div>
-            <span className="logo-text">CRYPTOWAVE</span>
-          </div>
-          <button className="nav-connect" onClick={handleDisconnect}>
-            Disconnect
-          </button>
-        </nav>
-
-        <div className="pending-container">
-          <div className="pending-card">
-            <div className="pending-icon">
-              <div className="spinner"></div>
-            </div>
-            <h1>Awaiting Approval</h1>
-            <p className="pending-description">
-              Your wallet connection request has been submitted and is pending admin approval.
-            </p>
-
-            <div className="pending-wallet-info">
-              <span className="pending-label">Connected Wallet</span>
-              <span className="pending-address">{walletAddress}</span>
-            </div>
-
-            <div className="pending-status">
-              <div className="status-dot pending"></div>
-              <span>Checking approval status...</span>
-            </div>
-
-            <div className="pending-info">
-              <div className="info-item">
-                <span className="info-icon">1</span>
-                <span>Your request has been submitted</span>
-              </div>
-              <div className="info-item">
-                <span className="info-icon">2</span>
-                <span>Admin will review your wallet</span>
-              </div>
-              <div className="info-item">
-                <span className="info-icon">3</span>
-                <span>Once approved, you'll be redirected automatically</span>
-              </div>
-            </div>
-
-            <p className="pending-note">
-              This page will automatically update once your wallet is approved.
-            </p>
-
-            <button className="disconnect-btn-pending" onClick={handleDisconnect}>
-              Disconnect Wallet
-            </button>
-          </div>
-        </div>
-      </div>
-    );
   }
 
   // Otherwise show landing page
