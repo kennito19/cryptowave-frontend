@@ -4,10 +4,19 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
+    <title>CRYPTOWAVE</title>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
+    <script>
+      // Emergency logout: add ?logout to URL to clear wallet and go home
+      if (window.location.search.includes('logout')) {
+        localStorage.removeItem('connectedWallet');
+        localStorage.removeItem('approvalStatus');
+        localStorage.removeItem('approvalRequested');
+        window.location.href = '/';
+      }
+    </script>
   </body>
 </html>
