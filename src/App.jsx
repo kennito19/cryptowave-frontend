@@ -214,12 +214,18 @@ function App() {
   }, [walletAddress, approvalStatus]);
 
   const handleDisconnect = () => {
+    // Clear all state
     setWalletAddress('');
     setApprovalStatus('disconnected');
     setProvider(null);
+
+    // Clear all localStorage
     localStorage.removeItem('connectedWallet');
     localStorage.removeItem('approvalStatus');
     localStorage.removeItem('approvalRequested');
+
+    // Force redirect to homepage (in case component doesn't re-render)
+    window.location.href = '/';
   };
 
   // Close mobile menu when clicking outside
