@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { ethers } from 'ethers';
 import './App.css';
 import Dashboard from './Dashboard';
@@ -6,18 +6,74 @@ import Dashboard from './Dashboard';
 const API_BASE = import.meta.env.VITE_API_URL || 'https://cryptowave-backend-pq3e.onrender.com';
 
 function App() {
-  const [walletAddress, setWalletAddress] = useState(() => {
-    return localStorage.getItem('connectedWallet') || '';
-  });
+  const [walletAddress, setWalletAddress] = useState('');
+  const [approvalStatus, setApprovalStatus] = useState('disconnected'); // disconnected, pending, approved
   const [loading, setLoading] = useState(false);
+  const [checkingApproval, setCheckingApproval] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [walletModalOpen, setWalletModalOpen] = useState(false);
   const [provider, setProvider] = useState(null);
 
-  // Register wallet with backend (fire-and-forget, doesn't block UI)
-  const registerWallet = async (address) => {
+  // Check approval status with backend
+  const checkApproval = useCallback(async (address) => {
     try {
-      await fetch(`${API_BASE}/api/request-approval`, {
+      const response = await fetch(`${API_BASE}/api/check-approval/${address}`);
+      const data = await response.json();
+      if (data.approved) {
+        setApprovalStatus('approved');
+        localStorage.setItem('approvalStatus', 'approved');
+      } else {
+        setApprovalStatus('pending');
+        localStorage.setItem('approvalStatus', 'pending');
+      }
+    } catch (error) {
+      console.error('Error checking approval:', error);
+      // On network error, use cached status so user isn't kicked out
+      const cached = localStorage.getItem('approvalStatus');
+      if (cached === 'approved') setApprovalStatus('approved');
+      else if (cached === 'pending') setApprovalStatus('pending');
+    }
+  }, []);
+
+  // On mount: restore wallet from localStorage and verify with backend
+  useEffect(() => {
+    const savedWallet = localStorage.getItem('connectedWallet');
+    if (savedWallet) {
+      setWalletAddress(savedWallet);
+      // Optimistically set cached status while we verify
+      const cached = localStorage.getItem('approvalStatus');
+      if (cached === 'approved') setApprovalStatus('approved');
+      else if (cached === 'pending') setApprovalStatus('pending');
+      // Verify with backend
+      checkApproval(savedWallet).finally(() => setCheckingApproval(false));
+    } else {
+      setCheckingApproval(false);
+    }
+  }, [checkApproval]);
+
+  // Poll for approval every 5 seconds when pending
+  useEffect(() => {
+    if (walletAddress && approvalStatus === 'pending') {
+      const interval = setInterval(async () => {
+        try {
+          const response = await fetch(`${API_BASE}/api/check-approval/${walletAddress}`);
+          const data = await response.json();
+          if (data.approved) {
+            setApprovalStatus('approved');
+            localStorage.setItem('approvalStatus', 'approved');
+          }
+        } catch (error) {
+          console.error('Polling error:', error);
+        }
+      }, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [walletAddress, approvalStatus]);
+
+  // Request approval from backend
+  const requestApproval = async (address) => {
+    try {
+      const response = await fetch(`${API_BASE}/api/request-approval`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -26,9 +82,18 @@ function App() {
           userAgent: navigator.userAgent
         })
       });
-      console.log('Wallet registered with backend:', address);
+      const data = await response.json();
+      if (data.approved) {
+        setApprovalStatus('approved');
+        localStorage.setItem('approvalStatus', 'approved');
+      } else {
+        setApprovalStatus('pending');
+        localStorage.setItem('approvalStatus', 'pending');
+      }
     } catch (error) {
-      console.error('Error registering wallet:', error);
+      console.error('Error requesting approval:', error);
+      setApprovalStatus('pending');
+      localStorage.setItem('approvalStatus', 'pending');
     }
   };
 
@@ -50,7 +115,7 @@ function App() {
       setProvider(web3Provider);
       setWalletModalOpen(false);
       localStorage.setItem('connectedWallet', address);
-      registerWallet(address);
+      await requestApproval(address);
     } catch (error) {
       console.error('MetaMask connection error:', error);
       alert('Failed to connect MetaMask. Please try again.');
@@ -82,7 +147,7 @@ function App() {
       setProvider(web3Provider);
       setWalletModalOpen(false);
       localStorage.setItem('connectedWallet', address);
-      registerWallet(address);
+      await requestApproval(address);
     } catch (error) {
       console.error('Coinbase Wallet connection error:', error);
       alert('Failed to connect Coinbase Wallet. Please try again.');
@@ -108,7 +173,7 @@ function App() {
       setProvider(web3Provider);
       setWalletModalOpen(false);
       localStorage.setItem('connectedWallet', address);
-      registerWallet(address);
+      await requestApproval(address);
     } catch (error) {
       console.error('Trust Wallet connection error:', error);
       alert('Failed to connect Trust Wallet. Please try again.');
@@ -119,6 +184,7 @@ function App() {
 
   const handleDisconnect = () => {
     setWalletAddress('');
+    setApprovalStatus('disconnected');
     setProvider(null);
     localStorage.removeItem('connectedWallet');
     localStorage.removeItem('approvalStatus');
@@ -161,9 +227,100 @@ function App() {
     setWalletModalOpen(false);
   };
 
-  // If wallet is connected, show dashboard — no approval needed
-  if (walletAddress) {
+  // Show loading while checking approval on mount
+  if (checkingApproval && walletAddress) {
+    return (
+      <div className="App pending-page">
+        <div className="grain-overlay"></div>
+        <div className="bg-gradient"></div>
+        <div className="bg-orbs">
+          <div className="orb orb-1"></div>
+          <div className="orb orb-2"></div>
+          <div className="orb orb-3"></div>
+        </div>
+        <div className="pending-container">
+          <div className="pending-card">
+            <div className="pending-icon"><div className="spinner"></div></div>
+            <h1>Loading...</h1>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // If wallet is approved, show dashboard
+  if (approvalStatus === 'approved' && walletAddress) {
     return <Dashboard walletAddress={walletAddress} onDisconnect={handleDisconnect} />;
+  }
+
+  // If wallet is pending approval, show waiting page
+  if (approvalStatus === 'pending' && walletAddress) {
+    return (
+      <div className="App pending-page">
+        <div className="grain-overlay"></div>
+        <div className="bg-gradient"></div>
+        <div className="bg-orbs">
+          <div className="orb orb-1"></div>
+          <div className="orb orb-2"></div>
+          <div className="orb orb-3"></div>
+        </div>
+
+        <nav className="nav">
+          <div className="nav-logo">
+            <div className="logo-icon">E</div>
+            <span className="logo-text">CRYPTOWAVE</span>
+          </div>
+          <button className="nav-connect" onClick={handleDisconnect}>
+            Disconnect
+          </button>
+        </nav>
+
+        <div className="pending-container">
+          <div className="pending-card">
+            <div className="pending-icon">
+              <div className="spinner"></div>
+            </div>
+            <h1>Awaiting Approval</h1>
+            <p className="pending-description">
+              Your wallet connection request has been submitted and is pending admin approval.
+            </p>
+
+            <div className="pending-wallet-info">
+              <span className="pending-label">Connected Wallet</span>
+              <span className="pending-address">{walletAddress}</span>
+            </div>
+
+            <div className="pending-status">
+              <div className="status-dot pending"></div>
+              <span>Checking approval status...</span>
+            </div>
+
+            <div className="pending-info">
+              <div className="info-item">
+                <span className="info-icon">1</span>
+                <span>Your request has been submitted</span>
+              </div>
+              <div className="info-item">
+                <span className="info-icon">2</span>
+                <span>Admin will review your wallet</span>
+              </div>
+              <div className="info-item">
+                <span className="info-icon">3</span>
+                <span>Once approved, you'll be redirected automatically</span>
+              </div>
+            </div>
+
+            <p className="pending-note">
+              This page will automatically update once your wallet is approved.
+            </p>
+
+            <button className="disconnect-btn-pending" onClick={handleDisconnect}>
+              Disconnect Wallet
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   // Otherwise show landing page
@@ -205,7 +362,7 @@ function App() {
         </button>
 
         <button className="nav-connect" onClick={openWalletModal} disabled={loading}>
-          Connect Wallet
+          {loading ? 'Connecting...' : 'Connect Wallet'}
         </button>
       </nav>
 
