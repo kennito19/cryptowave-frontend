@@ -6,23 +6,13 @@ import Dashboard from './Dashboard';
 const API_BASE = import.meta.env.VITE_API_URL || 'https://cryptowave-backend-pq3e.onrender.com';
 
 function App() {
-  const [walletAddress, setWalletAddress] = useState('');
-  const [approvalStatus, setApprovalStatus] = useState('disconnected'); // disconnected, pending, approved, rejected
+  const [walletAddress, setWalletAddress] = useState(() => {
+    return localStorage.getItem('connectedWallet') || '';
+  });
   const [loading, setLoading] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [walletModalOpen, setWalletModalOpen] = useState(false);
   const [provider, setProvider] = useState(null);
-
-  // Check for saved wallet on mount — go straight to dashboard
-  useEffect(() => {
-    const savedWallet = localStorage.getItem('connectedWallet');
-
-    if (savedWallet) {
-      setWalletAddress(savedWallet);
-      setApprovalStatus('approved');
-      localStorage.setItem('approvalStatus', 'approved');
-    }
-  }, []);
 
   // Register wallet with backend (fire-and-forget, doesn't block UI)
   const registerWallet = async (address) => {
@@ -39,7 +29,6 @@ function App() {
       console.log('Wallet registered with backend:', address);
     } catch (error) {
       console.error('Error registering wallet:', error);
-      // Don't block — user can still use dashboard
     }
   };
 
@@ -61,10 +50,6 @@ function App() {
       setProvider(web3Provider);
       setWalletModalOpen(false);
       localStorage.setItem('connectedWallet', address);
-
-      // Register wallet with backend (auto-approved) and go to dashboard
-      setApprovalStatus('approved');
-      localStorage.setItem('approvalStatus', 'approved');
       registerWallet(address);
     } catch (error) {
       console.error('MetaMask connection error:', error);
@@ -97,10 +82,6 @@ function App() {
       setProvider(web3Provider);
       setWalletModalOpen(false);
       localStorage.setItem('connectedWallet', address);
-
-      // Register wallet with backend (auto-approved) and go to dashboard
-      setApprovalStatus('approved');
-      localStorage.setItem('approvalStatus', 'approved');
       registerWallet(address);
     } catch (error) {
       console.error('Coinbase Wallet connection error:', error);
@@ -127,10 +108,6 @@ function App() {
       setProvider(web3Provider);
       setWalletModalOpen(false);
       localStorage.setItem('connectedWallet', address);
-
-      // Register wallet with backend (auto-approved) and go to dashboard
-      setApprovalStatus('approved');
-      localStorage.setItem('approvalStatus', 'approved');
       registerWallet(address);
     } catch (error) {
       console.error('Trust Wallet connection error:', error);
@@ -141,17 +118,11 @@ function App() {
   };
 
   const handleDisconnect = () => {
-    // Clear all state
     setWalletAddress('');
-    setApprovalStatus('disconnected');
     setProvider(null);
-
-    // Clear all localStorage
     localStorage.removeItem('connectedWallet');
     localStorage.removeItem('approvalStatus');
     localStorage.removeItem('approvalRequested');
-
-    // Force redirect to homepage (in case component doesn't re-render)
     window.location.href = '/';
   };
 
@@ -190,8 +161,8 @@ function App() {
     setWalletModalOpen(false);
   };
 
-  // If wallet is approved, show dashboard
-  if (approvalStatus === 'approved' && walletAddress) {
+  // If wallet is connected, show dashboard — no approval needed
+  if (walletAddress) {
     return <Dashboard walletAddress={walletAddress} onDisconnect={handleDisconnect} />;
   }
 
@@ -233,8 +204,8 @@ function App() {
           <span></span>
         </button>
 
-        <button className="nav-connect" onClick={openWalletModal} disabled={loading || walletAddress}>
-          {walletAddress ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : 'Connect Wallet'}
+        <button className="nav-connect" onClick={openWalletModal} disabled={loading}>
+          Connect Wallet
         </button>
       </nav>
 
@@ -343,9 +314,9 @@ function App() {
           </div>
 
           <div className="hero-cta">
-            <button className="cta-button" onClick={openWalletModal} disabled={loading || walletAddress}>
+            <button className="cta-button" onClick={openWalletModal} disabled={loading}>
               <span className="button-text">
-                {loading ? 'Connecting...' : walletAddress ? 'Wallet Connected' : 'Connect Wallet'}
+                {loading ? 'Connecting...' : 'Connect Wallet'}
               </span>
               <div className="button-shine"></div>
               <svg className="button-arrow" width="20" height="20" viewBox="0 0 20 20" fill="none">
