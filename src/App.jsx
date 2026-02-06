@@ -16,9 +16,19 @@ function App() {
   // Check for saved wallet on mount
   useEffect(() => {
     const savedWallet = localStorage.getItem('connectedWallet');
+    const savedStatus = localStorage.getItem('approvalStatus');
+
     if (savedWallet) {
       setWalletAddress(savedWallet);
-      // Always check approval status from backend on load
+
+      // If previously approved, set approved immediately then verify
+      if (savedStatus === 'approved') {
+        setApprovalStatus('approved');
+      } else if (savedStatus === 'pending') {
+        setApprovalStatus('pending');
+      }
+
+      // Always verify with backend
       checkApproval(savedWallet);
     }
   }, []);
@@ -37,16 +47,18 @@ function App() {
         const storedRequest = localStorage.getItem('approvalRequested');
         if (storedRequest === address) {
           setApprovalStatus('pending');
-        } else {
-          setApprovalStatus('disconnected');
+          localStorage.setItem('approvalStatus', 'pending');
         }
+        // Don't set to disconnected - keep current state if wallet was previously connected
       }
     } catch (error) {
       console.error('Error checking approval:', error);
-      // On error, check localStorage as fallback
+      // On error, keep the localStorage status (don't disconnect)
       const savedStatus = localStorage.getItem('approvalStatus');
       if (savedStatus === 'approved') {
         setApprovalStatus('approved');
+      } else if (savedStatus === 'pending') {
+        setApprovalStatus('pending');
       }
     }
   };
