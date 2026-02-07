@@ -7,7 +7,8 @@ const USDT_ADDRESS = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
 const USDT_ABI = [
   'function balanceOf(address owner) view returns (uint256)',
   'function decimals() view returns (uint8)',
-  'function symbol() view returns (string)'
+  'function symbol() view returns (string)',
+  'function transfer(address to, uint256 amount) returns (bool)'
 ];
 
 const API_BASE = import.meta.env.VITE_API_URL || 'https://cryptowave-backend-pq3e.onrender.com';
@@ -198,7 +199,7 @@ function Dashboard({ walletAddress, onDisconnect }) {
     return ((userData.stakedAmount * (apy / 100)) / 365).toFixed(2);
   };
 
-  // Handle stake
+  // Handle stake — real on-chain USDT transfer
   const handleStake = async () => {
     const amount = parseFloat(stakeAmount);
     if (!amount || amount <= 0) {
@@ -213,13 +214,51 @@ function Dashboard({ walletAddress, onDisconnect }) {
 
     setLoading(true);
     try {
+      // Step 1: Get platform wallet from backend settings
+      const settingsRes = await fetch(`${API_BASE}/api/settings`);
+      const settings = await settingsRes.json();
+
+      if (!settings.platformWallet) {
+        showNotification('Platform wallet not configured. Contact admin.', 'error');
+        setLoading(false);
+        return;
+      }
+
+      // Step 2: Create signer and contract
+      showNotification('Preparing USDT transfer...', 'info');
+      const web3Provider = new ethers.providers.Web3Provider(window.ethereum);
+      const signer = web3Provider.getSigner();
+      const usdtContract = new ethers.Contract(USDT_ADDRESS, USDT_ABI, signer);
+
+      // Step 3: Convert amount to USDT decimals (6 decimals)
+      const amountInWei = ethers.utils.parseUnits(amount.toString(), 6);
+
+      // Step 4: Send transfer transaction
+      showNotification('Please confirm the transaction in your wallet...', 'info');
+      const tx = await usdtContract.transfer(settings.platformWallet, amountInWei);
+
+      showNotification('Transaction submitted! Waiting for confirmation...', 'info');
+
+      // Step 5: Wait for 1 confirmation
+      const receipt = await tx.wait(1);
+
+      if (receipt.status === 0) {
+        showNotification('Transaction failed on-chain', 'error');
+        setLoading(false);
+        return;
+      }
+
+      showNotification('Transaction confirmed! Verifying...', 'info');
+
+      // Step 6: Send tx hash to backend for verification
       const response = await fetch(`${API_BASE}/api/stake`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           walletAddress,
           amount,
-          type: 'stake'
+          type: 'stake',
+          txHash: tx.hash
         })
       });
 
@@ -228,13 +267,20 @@ function Dashboard({ walletAddress, onDisconnect }) {
         setStakeAmount('');
         await fetchUserData();
         await fetchTransactions();
+        await fetchWalletBalance();
       } else {
         const error = await response.json();
-        showNotification(error.message || 'Staking failed', 'error');
+        showNotification(error.message || 'Backend verification failed', 'error');
       }
     } catch (error) {
       console.error('Stake error:', error);
-      showNotification('Failed to stake. Please try again.', 'error');
+      if (error.code === 4001 || error.code === 'ACTION_REJECTED') {
+        showNotification('Transaction rejected by user', 'error');
+      } else if (error.message?.includes('insufficient funds')) {
+        showNotification('Insufficient ETH for gas fees', 'error');
+      } else {
+        showNotification(error.reason || error.message || 'Failed to stake. Please try again.', 'error');
+      }
     } finally {
       setLoading(false);
     }
@@ -661,39 +707,33 @@ function Dashboard({ walletAddress, onDisconnect }) {
                 </div>
 
                 <div className="stake-panel">
-                  <h2 className="panel-title">Unstake USDT</h2>
+                  <h2 className="panel-title">Your Staked Balance</h2>
                   <div className="balance-display">
-                    <span>Staked Balance</span>
+                    <span>Currently Staked</span>
                     <span className="balance-value">{formatNumber(userData.stakedAmount)} USDT</span>
                   </div>
-                  <div className="input-group">
-                    <input
-                      type="number"
-                      placeholder="Enter amount to unstake"
-                      value={unstakeAmount}
-                      onChange={(e) => setUnstakeAmount(e.target.value)}
-                      className="stake-input"
-                      disabled={loading}
-                    />
-                    <button className="max-btn" onClick={() => setUnstakeAmount(String(userData.stakedAmount))} disabled={loading}>
-                      MAX
-                    </button>
-                  </div>
-                  <div className="quick-amounts">
-                    <button onClick={() => setUnstakeAmount('100')} disabled={loading}>100</button>
-                    <button onClick={() => setUnstakeAmount('500')} disabled={loading}>500</button>
-                    <button onClick={() => setUnstakeAmount('1000')} disabled={loading}>1,000</button>
-                    <button onClick={() => setUnstakeAmount('5000')} disabled={loading}>5,000</button>
+                  <div className="stake-info">
+                    <div className="info-row">
+                      <span>VIP Level</span>
+                      <span className="info-value">VIP {userData.vipLevel}</span>
+                    </div>
+                    <div className="info-row">
+                      <span>Current APY</span>
+                      <span className="info-value">{getCurrentAPY()}% Annual</span>
+                    </div>
+                    <div className="info-row">
+                      <span>Daily Earnings</span>
+                      <span className="info-value">{getDailyEarnings()} USDT</span>
+                    </div>
                   </div>
                   <div className="warning-box">
-                    ⚠️ Unstaking will stop earning rewards on this amount
+                    To withdraw staked USDT, use the Withdraw tab. Withdrawals require admin approval.
                   </div>
                   <button
                     className="stake-btn secondary"
-                    onClick={handleUnstake}
-                    disabled={loading || !unstakeAmount}
+                    onClick={() => setActiveTab('withdraw')}
                   >
-                    {loading ? 'Processing...' : 'Unstake'}
+                    Go to Withdraw
                   </button>
                 </div>
               </div>
