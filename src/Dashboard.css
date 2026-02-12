@@ -784,6 +784,21 @@ html, body, #root {
   max-width: 100%;
 }
 
+.earnings-withdraw-panel {
+  margin-bottom: 1.5rem;
+}
+
+.earnings-panel-highlight {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(5, 150, 105, 0.08) 100%) !important;
+  border-color: rgba(16, 185, 129, 0.3) !important;
+}
+
+.panel-subtitle {
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.5);
+  margin-bottom: 1.25rem;
+}
+
 .withdraw-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));

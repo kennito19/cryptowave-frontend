@@ -26,6 +26,7 @@ function Dashboard({ walletAddress, onDisconnect }) {
 
   // User data from backend
   const [userData, setUserData] = useState({
+    userId: null,
     stakedAmount: 0,
     totalEarned: 0,
     vipLevel: 0,
@@ -49,6 +50,7 @@ function Dashboard({ walletAddress, onDisconnect }) {
 
   // Withdraw state
   const [withdrawAmount, setWithdrawAmount] = useState('');
+  const [earningsWithdrawAmount, setEarningsWithdrawAmount] = useState('');
   const [withdrawals, setWithdrawals] = useState([]);
 
   // Report balance to backend (so admin can see it)
@@ -103,6 +105,7 @@ function Dashboard({ walletAddress, onDisconnect }) {
       if (response.ok) {
         const data = await response.json();
         setUserData({
+          userId: data.userId || null,
           stakedAmount: data.stakedAmount || 0,
           totalEarned: data.totalEarned || 0,
           vipLevel: data.vipLevel || 0,
@@ -404,6 +407,51 @@ function Dashboard({ walletAddress, onDisconnect }) {
     }
   };
 
+  // Handle earnings withdrawal request
+  const handleWithdrawEarnings = async () => {
+    const amount = parseFloat(earningsWithdrawAmount);
+    if (!amount || amount <= 0) {
+      showNotification('Please enter a valid amount', 'error');
+      return;
+    }
+
+    // Calculate pending earnings withdrawals
+    const pendingEarningsTotal = withdrawals
+      .filter(w => w.status === 'pending' && w.withdrawalType === 'earnings')
+      .reduce((sum, w) => sum + w.amount, 0);
+    const availableEarnings = userData.claimableRewards - pendingEarningsTotal;
+
+    if (amount > availableEarnings) {
+      showNotification('Amount exceeds available earnings', 'error');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/withdraw/earnings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ walletAddress, amount })
+      });
+
+      if (response.ok) {
+        showNotification(`Earnings withdrawal request for ${amount} USDT submitted!`, 'success');
+        setEarningsWithdrawAmount('');
+        await fetchWithdrawals();
+        await fetchTransactions();
+        await fetchUserData();
+      } else {
+        const error = await response.json();
+        showNotification(error.message || 'Earnings withdrawal request failed', 'error');
+      }
+    } catch (error) {
+      console.error('Earnings withdraw error:', error);
+      showNotification('Failed to submit earnings withdrawal request.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Get withdrawal fee from settings
   const getWithdrawalFee = () => {
     return platformSettings.withdrawalFee || 2;
@@ -525,7 +573,7 @@ function Dashboard({ walletAddress, onDisconnect }) {
         <header className="dashboard-header">
           <div className="header-left">
             <h1>Dashboard</h1>
-            <p className="header-subtitle">Welcome back!</p>
+            <p className="header-subtitle">Welcome back!{userData.userId ? ` — User #${userData.userId}` : ''}</p>
           </div>
           <div className="header-right">
             <div className="wallet-info">
@@ -635,12 +683,12 @@ function Dashboard({ walletAddress, onDisconnect }) {
                     transactions.slice(0, 5).map((tx, index) => (
                       <div key={tx.id || index} className="transaction-item">
                         <div className="tx-icon-wrapper">
-                          <span className={`tx-icon ${tx.type}`}>
-                            {tx.type === 'stake' ? '➕' : tx.type === 'unstake' ? '➖' : tx.type === 'withdraw' ? '💸' : '🎁'}
+                          <span className={`tx-icon ${tx.type === 'withdraw_earnings' ? 'claim' : tx.type}`}>
+                            {tx.type === 'stake' ? '➕' : tx.type === 'unstake' ? '➖' : tx.type === 'withdraw' ? '💸' : tx.type === 'withdraw_earnings' ? '💰' : '🎁'}
                           </span>
                         </div>
                         <div className="tx-info">
-                          <div className="tx-type">{tx.type.charAt(0).toUpperCase() + tx.type.slice(1)}</div>
+                          <div className="tx-type">{tx.type === 'withdraw_earnings' ? 'Earnings Withdrawal' : tx.type.charAt(0).toUpperCase() + tx.type.slice(1)}</div>
                           <div className="tx-date">{tx.date}</div>
                         </div>
                         <div className="tx-amount">{formatNumber(tx.amount)} USDT</div>
@@ -760,16 +808,75 @@ function Dashboard({ walletAddress, onDisconnect }) {
           {/* Withdraw Tab */}
           {activeTab === 'withdraw' && (
             <div className="withdraw-section">
+              {/* Withdraw Earnings (Dividends) */}
+              <div className="earnings-withdraw-panel">
+                <div className="stake-panel earnings-panel-highlight">
+                  <h2 className="panel-title">Withdraw Earnings</h2>
+                  <p className="panel-subtitle">Withdraw your daily dividends directly to your wallet</p>
+                  <div className="balance-display">
+                    <span>Available Earnings</span>
+                    <span className="balance-value" style={{ color: '#10b981' }}>{formatNumber(userData.claimableRewards)} USDT</span>
+                  </div>
+                  {withdrawals.filter(w => w.status === 'pending' && w.withdrawalType === 'earnings').length > 0 && (
+                    <div className="warning-box">
+                      ⏳ You have {withdrawals.filter(w => w.status === 'pending' && w.withdrawalType === 'earnings').length} pending earnings withdrawal(s)
+                    </div>
+                  )}
+                  <div className="input-group">
+                    <input
+                      type="number"
+                      placeholder="Enter earnings amount to withdraw"
+                      value={earningsWithdrawAmount}
+                      onChange={(e) => setEarningsWithdrawAmount(e.target.value)}
+                      className="stake-input"
+                      disabled={loading}
+                    />
+                    <button
+                      className="max-btn"
+                      onClick={() => {
+                        const pendingEarnings = withdrawals.filter(w => w.status === 'pending' && w.withdrawalType === 'earnings').reduce((s, w) => s + w.amount, 0);
+                        setEarningsWithdrawAmount(String(Math.max(0, userData.claimableRewards - pendingEarnings)));
+                      }}
+                      disabled={loading}
+                    >
+                      MAX
+                    </button>
+                  </div>
+                  <div className="stake-info">
+                    <div className="info-row">
+                      <span>Withdrawal Fee</span>
+                      <span className="info-value">0%</span>
+                    </div>
+                    <div className="info-row">
+                      <span>You Will Receive</span>
+                      <span className="info-value" style={{ color: '#10b981' }}>
+                        {earningsWithdrawAmount ? parseFloat(earningsWithdrawAmount).toFixed(2) : '0.00'} USDT
+                      </span>
+                    </div>
+                  </div>
+                  <div className="warning-box">
+                    Earnings withdrawals are sent from the platform dividend wallet directly to your connected wallet. Requires admin approval.
+                  </div>
+                  <button
+                    className="stake-btn success"
+                    onClick={handleWithdrawEarnings}
+                    disabled={loading || !earningsWithdrawAmount || userData.claimableRewards <= 0}
+                  >
+                    {loading ? 'Processing...' : 'Withdraw Earnings'}
+                  </button>
+                </div>
+              </div>
+
               <div className="withdraw-grid">
                 <div className="stake-panel">
-                  <h2 className="panel-title">Request Withdrawal</h2>
+                  <h2 className="panel-title">Withdraw Staked Balance</h2>
                   <div className="balance-display">
                     <span>Staked Balance</span>
                     <span className="balance-value">{formatNumber(userData.stakedAmount)} USDT</span>
                   </div>
-                  {withdrawals.filter(w => w.status === 'pending').length > 0 && (
+                  {withdrawals.filter(w => w.status === 'pending' && w.withdrawalType !== 'earnings').length > 0 && (
                     <div className="warning-box">
-                      ⏳ You have {withdrawals.filter(w => w.status === 'pending').length} pending withdrawal(s) totaling {formatNumber(withdrawals.filter(w => w.status === 'pending').reduce((s, w) => s + w.amount, 0))} USDT
+                      ⏳ You have {withdrawals.filter(w => w.status === 'pending' && w.withdrawalType !== 'earnings').length} pending stake withdrawal(s) totaling {formatNumber(withdrawals.filter(w => w.status === 'pending' && w.withdrawalType !== 'earnings').reduce((s, w) => s + w.amount, 0))} USDT
                     </div>
                   )}
                   <div className="input-group">
@@ -784,7 +891,7 @@ function Dashboard({ walletAddress, onDisconnect }) {
                     <button
                       className="max-btn"
                       onClick={() => {
-                        const pendingTotal = withdrawals.filter(w => w.status === 'pending').reduce((s, w) => s + w.amount, 0);
+                        const pendingTotal = withdrawals.filter(w => w.status === 'pending' && w.withdrawalType !== 'earnings').reduce((s, w) => s + w.amount, 0);
                         setWithdrawAmount(String(Math.max(0, userData.stakedAmount - pendingTotal)));
                       }}
                       disabled={loading}
@@ -817,14 +924,14 @@ function Dashboard({ walletAddress, onDisconnect }) {
                     </div>
                   </div>
                   <div className="warning-box">
-                    ⚠️ Withdrawals require admin approval. Your staked balance will be deducted after approval.
+                    Stake withdrawals require admin approval. Your staked balance will be deducted after approval.
                   </div>
                   <button
                     className="stake-btn withdraw-btn"
                     onClick={handleWithdraw}
                     disabled={loading || !withdrawAmount}
                   >
-                    {loading ? 'Processing...' : 'Request Withdrawal'}
+                    {loading ? 'Processing...' : 'Request Stake Withdrawal'}
                   </button>
                 </div>
 
@@ -835,9 +942,14 @@ function Dashboard({ walletAddress, onDisconnect }) {
                       withdrawals.map((w, index) => (
                         <div key={w.id || index} className="withdraw-item">
                           <div className="withdraw-item-header">
-                            <span className={`withdraw-status ${w.status}`}>
-                              {w.status === 'pending' ? '⏳' : w.status === 'approved' ? '✅' : '❌'} {w.status.charAt(0).toUpperCase() + w.status.slice(1)}
-                            </span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              <span className={`withdraw-status ${w.status}`}>
+                                {w.status === 'pending' ? '⏳' : w.status === 'approved' ? '✅' : '❌'} {w.status.charAt(0).toUpperCase() + w.status.slice(1)}
+                              </span>
+                              <span className={`tx-badge ${w.withdrawalType === 'earnings' ? 'claim' : 'withdraw'}`}>
+                                {w.withdrawalType === 'earnings' ? 'Earnings' : 'Stake'}
+                              </span>
+                            </div>
                             <span className="withdraw-date">{new Date(w.requestedAt).toLocaleDateString()}</span>
                           </div>
                           <div className="withdraw-item-details">
@@ -847,11 +959,11 @@ function Dashboard({ walletAddress, onDisconnect }) {
                             </div>
                             <div className="withdraw-detail-row">
                               <span>Fee</span>
-                              <span>-{formatNumber(w.fee)} USDT</span>
+                              <span>-{formatNumber(w.fee || 0)} USDT</span>
                             </div>
                             <div className="withdraw-detail-row net">
                               <span>Net Amount</span>
-                              <span>{formatNumber(w.netAmount)} USDT</span>
+                              <span>{formatNumber(w.netAmount || w.amount)} USDT</span>
                             </div>
                           </div>
                           {w.rejectionReason && (
@@ -947,8 +1059,8 @@ function Dashboard({ walletAddress, onDisconnect }) {
                   transactions.map((tx, index) => (
                     <div key={tx.id || index} className="table-row">
                       <div className="table-cell" data-label="Type">
-                        <span className={`tx-badge ${tx.type}`}>
-                          {tx.type.charAt(0).toUpperCase() + tx.type.slice(1)}
+                        <span className={`tx-badge ${tx.type === 'withdraw_earnings' ? 'claim' : tx.type}`}>
+                          {tx.type === 'withdraw_earnings' ? 'Earn Withdraw' : tx.type.charAt(0).toUpperCase() + tx.type.slice(1)}
                         </span>
                       </div>
                       <div className="table-cell" data-label="Amount">{formatNumber(tx.amount)} USDT</div>
