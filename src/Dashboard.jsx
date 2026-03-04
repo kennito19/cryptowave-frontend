@@ -557,7 +557,7 @@ function Dashboard({ walletAddress, onDisconnect }) {
         <div className="sidebar-footer">
           <button className="disconnect-btn" onClick={onDisconnect}>
             <span>🚪</span>
-            <span>Disconnect</span>
+            <span>Logout</span>
           </button>
         </div>
       </aside>

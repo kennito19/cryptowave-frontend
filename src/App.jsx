@@ -271,7 +271,7 @@ function App() {
             <span className="logo-text">CRYPTOWAVE</span>
           </div>
           <button className="nav-connect" onClick={handleDisconnect}>
-            Disconnect
+            Logout
           </button>
         </nav>
 
@@ -315,7 +315,7 @@ function App() {
             </p>
 
             <button className="disconnect-btn-pending" onClick={handleDisconnect}>
-              Disconnect Wallet
+              Logout
             </button>
           </div>
         </div>
