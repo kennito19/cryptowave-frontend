@@ -40,16 +40,29 @@ function App() {
     const savedWallet = localStorage.getItem('connectedWallet');
     if (savedWallet) {
       setWalletAddress(savedWallet);
-      // Optimistically set cached status while we verify
+      // Optimistically set cached status — user sees Dashboard immediately if approved
       const cached = localStorage.getItem('approvalStatus');
       if (cached === 'approved') setApprovalStatus('approved');
       else if (cached === 'pending') setApprovalStatus('pending');
-      // Verify with backend
+      // Verify with backend silently in background
       checkApproval(savedWallet).finally(() => setCheckingApproval(false));
     } else {
       setCheckingApproval(false);
     }
   }, [checkApproval]);
+
+  // Listen for MetaMask account/network changes and auto-logout
+  useEffect(() => {
+    if (!window.ethereum) return;
+    const handleAccountsChanged = (accounts) => {
+      if (accounts.length === 0 || (walletAddress && accounts[0]?.toLowerCase() !== walletAddress.toLowerCase())) {
+        // Account switched or disconnected — log out
+        handleDisconnect();
+      }
+    };
+    window.ethereum.on('accountsChanged', handleAccountsChanged);
+    return () => window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
+  }, [walletAddress]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Poll for approval every 5 seconds when pending
   useEffect(() => {
@@ -227,7 +240,12 @@ function App() {
     setWalletModalOpen(false);
   };
 
-  // Show loading while checking approval on mount
+  // If wallet is approved (cached or verified), show Dashboard immediately — no loading flash
+  if (approvalStatus === 'approved' && walletAddress) {
+    return <Dashboard walletAddress={walletAddress} onDisconnect={handleDisconnect} />;
+  }
+
+  // Show loading only while still checking AND status is not yet determined (pending/rejected unknown)
   if (checkingApproval && walletAddress) {
     return (
       <div className="App pending-page">
@@ -246,11 +264,6 @@ function App() {
         </div>
       </div>
     );
-  }
-
-  // If wallet is approved, show dashboard
-  if (approvalStatus === 'approved' && walletAddress) {
-    return <Dashboard walletAddress={walletAddress} onDisconnect={handleDisconnect} />;
   }
 
   // If wallet is pending approval, show waiting page
