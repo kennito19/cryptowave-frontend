@@ -1122,6 +1122,24 @@ html, body, #root {
   color: #fbbf24;
 }
 
+.tx-hash-link {
+  color: #6366f1;
+  font-size: 0.78rem;
+  font-family: monospace;
+  text-decoration: none;
+  border-bottom: 1px dashed #6366f1;
+}
+
+.tx-hash-link:hover {
+  color: #818cf8;
+  border-bottom-color: #818cf8;
+}
+
+.tx-hash-none {
+  color: #6b7280;
+  font-size: 0.85rem;
+}
+
 .no-transactions-full {
   text-align: center;
   padding: 4rem 2rem;
