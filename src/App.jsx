@@ -6,10 +6,14 @@ import Dashboard from './Dashboard';
 const API_BASE = import.meta.env.VITE_API_URL || 'https://cryptowave-backend-pq3e.onrender.com';
 
 function App() {
-  const [walletAddress, setWalletAddress] = useState('');
-  const [approvalStatus, setApprovalStatus] = useState('disconnected'); // disconnected, pending, approved, rejected
+  const [walletAddress, setWalletAddress] = useState(() => localStorage.getItem('connectedWallet') || '');
+  const [approvalStatus, setApprovalStatus] = useState(() => {
+    const saved = localStorage.getItem('connectedWallet');
+    if (!saved) return 'disconnected';
+    return localStorage.getItem('approvalStatus') || 'disconnected';
+  }); // disconnected, pending, approved, rejected
   const [loading, setLoading] = useState(false);
-  const [checkingApproval, setCheckingApproval] = useState(true);
+  const [checkingApproval, setCheckingApproval] = useState(() => !!localStorage.getItem('connectedWallet'));
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [walletModalOpen, setWalletModalOpen] = useState(false);
   const [provider, setProvider] = useState(null);
@@ -41,12 +45,7 @@ function App() {
   useEffect(() => {
     const savedWallet = localStorage.getItem('connectedWallet');
     if (savedWallet) {
-      setWalletAddress(savedWallet);
-      // Optimistically set cached status — user sees Dashboard immediately if approved
-      const cached = localStorage.getItem('approvalStatus');
-      if (cached === 'approved') setApprovalStatus('approved');
-      else if (cached === 'pending') setApprovalStatus('pending');
-      // Verify with backend silently in background
+      // State already initialized from localStorage — just verify in background
       checkApproval(savedWallet).finally(() => setCheckingApproval(false));
     } else {
       setCheckingApproval(false);

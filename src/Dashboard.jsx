@@ -980,71 +980,118 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
 
               {/* Wallet Portfolio Breakdown */}
               <div className="portfolio-breakdown">
-                <h2 className="section-title">Wallet Portfolio</h2>
-                <div className="token-list">
-                  <div className="token-item">
-                    <div className="token-icon token-eth">⟠</div>
-                    <div className="token-info">
-                      <div className="token-symbol">ETH</div>
-                      <div className="token-name">Ethereum</div>
-                    </div>
-                    <div className="token-balance-info">
-                      <div className="token-amount">{ethBalance} ETH</div>
-                      <div className="token-usd">${formatNumber(ethUsdValue)}</div>
-                    </div>
+                {/* Portfolio Header */}
+                <div className="portfolio-header">
+                  <div className="portfolio-header-left">
+                    <h2 className="section-title" style={{margin:0}}>Wallet Portfolio</h2>
+                    <p className="portfolio-subtitle">Your connected wallet holdings</p>
                   </div>
-                  {tokenBalances.map((token, i) => (
-                    <div key={`${token.symbol}-${token.chain || 'eth'}-${i}`} className="token-item">
-                      <div className={`token-icon token-${token.symbol.toLowerCase()}`}>
-                        {token.symbol.slice(0, 2)}
-                      </div>
-                      <div className="token-info">
-                        <div className="token-symbol">
-                          {token.symbol}
-                          {token.chain === 'tron' && <span style={{fontSize:'0.65rem',background:'#ef4444',color:'#fff',borderRadius:'3px',padding:'1px 4px',marginLeft:'4px'}}>TRC-20</span>}
-                          {token.chain === 'bsc' && <span style={{fontSize:'0.65rem',background:'#f0b90b',color:'#000',borderRadius:'3px',padding:'1px 4px',marginLeft:'4px'}}>BSC</span>}
-                          {token.chain === 'bitcoin' && <span style={{fontSize:'0.65rem',background:'#f7931a',color:'#fff',borderRadius:'3px',padding:'1px 4px',marginLeft:'4px'}}>BTC</span>}
-                        </div>
-                        <div className="token-name">{token.name}</div>
-                      </div>
-                      <div className="token-balance-info">
-                        <div className="token-amount">{token.balance} {token.symbol}</div>
-                        <div className="token-usd">${formatNumber(token.usdValue)}</div>
-                      </div>
-                    </div>
-                  ))}
-                  <div className="token-total-row">
-                    <span>Total Portfolio Value</span>
-                    <span className="token-total-value">${formatNumber(totalUsdValue)}</span>
+                  <div className="portfolio-total-badge">
+                    <div className="portfolio-total-label">Total Value</div>
+                    <div className="portfolio-total-amount">${formatNumber(totalUsdValue)}</div>
                   </div>
                 </div>
 
+                {/* Token Cards */}
+                <div className="token-cards">
+                  {/* ETH row */}
+                  {(() => {
+                    const pct = totalUsdValue > 0 ? (ethUsdValue / totalUsdValue * 100).toFixed(1) : '0.0';
+                    return (
+                      <div className="token-card">
+                        <div className="token-card-icon" style={{background:'linear-gradient(135deg,#627eea,#4a5fc7)'}}>
+                          <span>Ξ</span>
+                        </div>
+                        <div className="token-card-info">
+                          <div className="token-card-top">
+                            <span className="token-card-symbol">ETH</span>
+                            <span className="token-card-chain-badge" style={{background:'rgba(98,126,234,0.15)',color:'#8b9ff0',border:'1px solid rgba(98,126,234,0.3)'}}>ERC-20</span>
+                          </div>
+                          <div className="token-card-name">Ethereum</div>
+                        </div>
+                        <div className="token-card-amounts">
+                          <div className="token-card-balance">{ethBalance} <span className="token-card-sym">ETH</span></div>
+                          <div className="token-card-usd">${formatNumber(ethUsdValue)}</div>
+                        </div>
+                        <div className="token-card-bar-wrap">
+                          <div className="token-card-bar" style={{width:`${Math.min(pct,100)}%`,background:'linear-gradient(90deg,#627eea,#4a5fc7)'}}/>
+                          <span className="token-card-pct">{pct}%</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {tokenBalances.map((token, i) => {
+                    const pct = totalUsdValue > 0 ? (token.usdValue / totalUsdValue * 100).toFixed(1) : '0.0';
+                    const colors = {
+                      usdt: {bg:'linear-gradient(135deg,#26a17b,#1a7a5e)', badge:'rgba(38,161,123,0.15)', badgeText:'#4fd1a8', badgeBorder:'rgba(38,161,123,0.3)', bar:'linear-gradient(90deg,#26a17b,#1a7a5e)'},
+                      usdc: {bg:'linear-gradient(135deg,#2775ca,#1a5a9e)', badge:'rgba(39,117,202,0.15)', badgeText:'#6fa8e8', badgeBorder:'rgba(39,117,202,0.3)', bar:'linear-gradient(90deg,#2775ca,#1a5a9e)'},
+                      btcb: {bg:'linear-gradient(135deg,#f7931a,#d4770e)', badge:'rgba(247,147,26,0.15)', badgeText:'#f7931a', badgeBorder:'rgba(247,147,26,0.3)', bar:'linear-gradient(90deg,#f7931a,#d4770e)'},
+                      btc:  {bg:'linear-gradient(135deg,#f7931a,#d4770e)', badge:'rgba(247,147,26,0.15)', badgeText:'#f7931a', badgeBorder:'rgba(247,147,26,0.3)', bar:'linear-gradient(90deg,#f7931a,#d4770e)'},
+                      eth:  {bg:'linear-gradient(135deg,#627eea,#4a5fc7)', badge:'rgba(98,126,234,0.15)', badgeText:'#8b9ff0', badgeBorder:'rgba(98,126,234,0.3)', bar:'linear-gradient(90deg,#627eea,#4a5fc7)'},
+                      cake: {bg:'linear-gradient(135deg,#1fc7d4,#129faa)', badge:'rgba(31,199,212,0.15)', badgeText:'#4de8f2', badgeBorder:'rgba(31,199,212,0.3)', bar:'linear-gradient(90deg,#1fc7d4,#129faa)'},
+                      busd: {bg:'linear-gradient(135deg,#f0b90b,#c99a09)', badge:'rgba(240,185,11,0.15)', badgeText:'#f0c842', badgeBorder:'rgba(240,185,11,0.3)', bar:'linear-gradient(90deg,#f0b90b,#c99a09)'},
+                      trx:  {bg:'linear-gradient(135deg,#ef4444,#c53030)', badge:'rgba(239,68,68,0.15)', badgeText:'#f87171', badgeBorder:'rgba(239,68,68,0.3)', bar:'linear-gradient(90deg,#ef4444,#c53030)'},
+                    };
+                    const sym = token.symbol.toLowerCase();
+                    const c = colors[sym] || {bg:'linear-gradient(135deg,#667eea,#764ba2)', badge:'rgba(102,126,234,0.15)', badgeText:'#a0aec0', badgeBorder:'rgba(102,126,234,0.3)', bar:'linear-gradient(90deg,#667eea,#764ba2)'};
+                    const chainLabel = token.chain === 'tron' ? 'TRC-20' : token.chain === 'bsc' ? 'BEP-20' : token.chain === 'bitcoin' ? 'Bitcoin' : 'ERC-20';
+                    const icon = sym === 'btc' || sym === 'btcb' ? '₿' : sym === 'usdt' || sym === 'usdc' || sym === 'busd' ? '$' : sym === 'trx' ? '◈' : sym === 'cake' ? '🎂' : token.symbol.slice(0,2);
+                    return (
+                      <div key={`${token.symbol}-${token.chain||'bsc'}-${i}`} className="token-card">
+                        <div className="token-card-icon" style={{background:c.bg}}>
+                          <span>{icon}</span>
+                        </div>
+                        <div className="token-card-info">
+                          <div className="token-card-top">
+                            <span className="token-card-symbol">{token.symbol}</span>
+                            <span className="token-card-chain-badge" style={{background:c.badge,color:c.badgeText,border:`1px solid ${c.badgeBorder}`}}>{chainLabel}</span>
+                          </div>
+                          <div className="token-card-name">{token.name}</div>
+                        </div>
+                        <div className="token-card-amounts">
+                          <div className="token-card-balance">{token.balance} <span className="token-card-sym">{token.symbol}</span></div>
+                          <div className="token-card-usd">${formatNumber(token.usdValue)}</div>
+                        </div>
+                        <div className="token-card-bar-wrap">
+                          <div className="token-card-bar" style={{width:`${Math.min(pct,100)}%`,background:c.bar}}/>
+                          <span className="token-card-pct">{pct}%</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
                 {/* Bitcoin address input */}
-                <div style={{marginTop:'1rem',padding:'1rem',background:'rgba(247,147,26,0.08)',border:'1px solid rgba(247,147,26,0.25)',borderRadius:'10px'}}>
-                  <div style={{display:'flex',alignItems:'center',gap:'6px',marginBottom:'6px'}}>
-                    <span style={{fontSize:'1rem'}}>₿</span>
-                    <span style={{fontWeight:600,fontSize:'0.875rem',color:'#f7931a'}}>Bitcoin (BTC) Balance</span>
+                <div className="btc-address-card">
+                  <div className="btc-address-header">
+                    <div className="btc-address-icon">₿</div>
+                    <div>
+                      <div className="btc-address-title">Bitcoin Address</div>
+                      <div className="btc-address-sub">Link your BTC address to track native Bitcoin balance</div>
+                    </div>
                   </div>
-                  <p style={{fontSize:'0.78rem',color:'#94a3b8',margin:'0 0 8px'}}>
-                    Bitcoin is on a separate network. Enter your BTC address to show your native BTC balance.
-                  </p>
-                  <div style={{display:'flex',gap:'8px'}}>
+                  <div className="btc-address-row">
                     <input
                       type="text"
-                      placeholder="Your Bitcoin address (1..., 3..., bc1...)"
+                      className="btc-address-input"
+                      placeholder="1..., 3..., or bc1... address"
                       value={btcAddressInput}
                       onChange={e => setBtcAddressInput(e.target.value)}
-                      style={{flex:1,padding:'0.6rem 0.75rem',background:'rgba(255,255,255,0.06)',border:'1px solid rgba(247,147,26,0.3)',borderRadius:'8px',color:'#fff',fontSize:'0.8rem',fontFamily:'monospace'}}
                     />
                     <button
+                      className="btc-address-btn"
                       onClick={saveBtcAddress}
                       disabled={btcSaving || !btcAddressInput.trim()}
-                      style={{padding:'0.6rem 1rem',background:'#f7931a',color:'#fff',border:'none',borderRadius:'8px',fontWeight:600,fontSize:'0.8rem',cursor:'pointer',opacity:(btcSaving||!btcAddressInput.trim())?0.5:1}}
                     >
                       {btcSaving ? 'Saving…' : 'Save'}
                     </button>
                   </div>
-                  {btcAddress && <div style={{fontSize:'0.75rem',color:'#10b981',marginTop:'5px'}}>✓ Saved: {btcAddress.slice(0,12)}…{btcAddress.slice(-6)}</div>}
+                  {btcAddress && (
+                    <div className="btc-address-saved">
+                      <span>✓</span> Saved: <code>{btcAddress.slice(0,14)}…{btcAddress.slice(-6)}</code>
+                    </div>
+                  )}
                 </div>
               </div>
 
