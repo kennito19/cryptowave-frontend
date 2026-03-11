@@ -33,7 +33,14 @@ const BSC_TOKENS = [
   { symbol: 'BUSD',  name: 'Binance USD',         address: '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56', decimals: 18, coingeckoId: 'binance-usd' },
   { symbol: 'WBNB',  name: 'Wrapped BNB',         address: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c', decimals: 18, coingeckoId: 'wbnb' },
   { symbol: 'CAKE',  name: 'PancakeSwap',         address: '0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82', decimals: 18, coingeckoId: 'pancakeswap-token' },
-  { symbol: 'DAI',   name: 'Dai (BSC)',           address: '0x1AF3F329e8BE154074D8769D1FFa4eE058B1DBc3', decimals: 18, coingeckoId: 'dai' },
+  { symbol: 'BTCB',  name: 'Bitcoin (BSC)',        address: '0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c', decimals: 18, coingeckoId: 'bitcoin' },
+  { symbol: 'ETH',   name: 'Ethereum (BSC)',       address: '0x2170Ed0880ac9A755fd29B2688956BD959F933F8', decimals: 18, coingeckoId: 'ethereum' },
+  { symbol: 'DAI',   name: 'Dai (BSC)',            address: '0x1AF3F329e8BE154074D8769D1FFa4eE058B1DBc3', decimals: 18, coingeckoId: 'dai' },
+  { symbol: 'XRP',   name: 'XRP Token (BSC)',      address: '0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE', decimals: 18, coingeckoId: 'ripple' },
+  { symbol: 'ADA',   name: 'Cardano (BSC)',        address: '0x3EE2200Efb3400fAbB9AacF31297cBdD1d435D47', decimals: 18, coingeckoId: 'cardano' },
+  { symbol: 'DOT',   name: 'Polkadot (BSC)',       address: '0x7083609fCE4d1d8Dc0C979AAb8c869Ea2C873402', decimals: 18, coingeckoId: 'polkadot' },
+  { symbol: 'LINK',  name: 'Chainlink (BSC)',      address: '0xF8A0BF9cF54Bb92F17374d9e9A321E6a111a51bD', decimals: 18, coingeckoId: 'chainlink' },
+  { symbol: 'LTC',   name: 'Litecoin (BSC)',       address: '0x4338665CBB7B2485A8855A139b75D5e34AB0DB94', decimals: 18, coingeckoId: 'litecoin' },
 ];
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -150,7 +157,8 @@ function Dashboard({ walletAddress, onDisconnect }) {
       let prices = {};
       try {
         const allIds = [
-          'ethereum', 'binancecoin', 'wbnb', 'pancakeswap-token',
+          'ethereum', 'binancecoin', 'wbnb', 'pancakeswap-token', 'bitcoin',
+          'ripple', 'cardano', 'polkadot', 'litecoin',
           ...KNOWN_TOKENS.map(t => t.coingeckoId),
           ...BSC_TOKENS.map(t => t.coingeckoId),
         ];
