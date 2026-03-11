@@ -83,7 +83,38 @@ async function fetchTronUSDT(ethAddress) {
 }
 // ────────────────────────────────────────────────────────────────────────────
 
-function Dashboard({ walletAddress, onDisconnect }) {
+// Shows the platform's deposit address for manual-deposit networks (TRX, BTC)
+function DepositAddress({ network, apiBase }) {
+  const [addr, setAddr] = useState('');
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    fetch(`${apiBase}/api/settings`).then(r => r.json()).then(s => {
+      setAddr(network === 'TRX' ? (s.platformWalletTRX || '') : (s.platformWalletBTC || ''));
+    }).catch(() => {});
+  }, [network, apiBase]);
+
+  const copy = () => { navigator.clipboard.writeText(addr); setCopied(true); setTimeout(() => setCopied(false), 2000); };
+
+  if (!addr) return (
+    <div style={{background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',borderRadius:'10px',padding:'12px',textAlign:'center',color:'#f87171',fontSize:'0.82rem'}}>
+      ⚠️ Admin has not configured the {network} deposit wallet yet. Contact support.
+    </div>
+  );
+
+  return (
+    <div style={{background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:'10px',padding:'14px'}}>
+      <div style={{fontSize:'0.75rem',color:'#94a3b8',marginBottom:'6px',fontWeight:600}}>
+        {network === 'TRX' ? '🔴 USDT TRC-20 Deposit Address' : '🟠 Bitcoin (BTC) Deposit Address'}
+      </div>
+      <div style={{fontFamily:'monospace',fontSize:'0.78rem',color:'#e2e8f0',wordBreak:'break-all',marginBottom:'10px',lineHeight:'1.5'}}>{addr}</div>
+      <button onClick={copy} style={{padding:'6px 16px',background:copied?'rgba(16,185,129,0.2)':'rgba(255,255,255,0.08)',border:`1px solid ${copied?'rgba(16,185,129,0.4)':'rgba(255,255,255,0.15)'}`,borderRadius:'8px',color:copied?'#10b981':'#e2e8f0',fontSize:'0.78rem',fontWeight:600,cursor:'pointer'}}>
+        {copied ? '✓ Copied!' : 'Copy Address'}
+      </button>
+    </div>
+  );
+}
+
+function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
   const [activeTab, setActiveTab] = useState('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notification, setNotification] = useState({ show: false, message: '', type: '' });
@@ -127,6 +158,8 @@ function Dashboard({ walletAddress, onDisconnect }) {
   // Staking form state
   const [stakeAmount, setStakeAmount] = useState('');
   const [unstakeAmount, setUnstakeAmount] = useState('');
+  const [manualTxHash, setManualTxHash] = useState('');
+  const [manualDepositLoading, setManualDepositLoading] = useState(false);
 
   // Withdraw state
   const [withdrawAmount, setWithdrawAmount] = useState('');
@@ -432,90 +465,96 @@ function Dashboard({ walletAddress, onDisconnect }) {
   };
 
   // Handle stake — real on-chain USDT transfer
+  // USDT contract addresses per network
+  const USDT_BY_NETWORK = {
+    BSC: { address: '0x55d398326f99059fF775485246999027B3197955', decimals: 18, chainId: '0x38', chainName: 'BNB Smart Chain' },
+    ETH: { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', decimals: 6,  chainId: '0x1',  chainName: 'Ethereum Mainnet' },
+  };
+
   const handleStake = async () => {
     const amount = parseFloat(stakeAmount);
-    if (!amount || amount <= 0) {
-      showNotification('Please enter a valid amount', 'error');
-      return;
-    }
-
-    if (amount > parseFloat(usdtBalance)) {
-      showNotification('Insufficient USDT balance', 'error');
-      return;
-    }
+    if (!amount || amount <= 0) { showNotification('Please enter a valid amount', 'error'); return; }
+    if (amount > parseFloat(usdtBalance)) { showNotification('Insufficient USDT balance', 'error'); return; }
 
     setLoading(true);
     try {
-      // Step 1: Get platform wallet from backend settings
       const settingsRes = await fetch(`${API_BASE}/api/settings`);
       const settings = await settingsRes.json();
 
-      if (!settings.platformWallet) {
-        showNotification('Platform wallet not configured. Contact admin.', 'error');
-        setLoading(false);
-        return;
+      const netConfig = USDT_BY_NETWORK[network] || USDT_BY_NETWORK['BSC'];
+      const platformAddr = network === 'ETH'
+        ? (settings.platformWalletETH || settings.platformWallet)
+        : settings.platformWallet;
+
+      if (!platformAddr) { showNotification('Platform wallet not configured. Contact admin.', 'error'); setLoading(false); return; }
+
+      showNotification(`Switching to ${netConfig.chainName}...`, 'info');
+      const web3Provider = new ethers.providers.Web3Provider(window.ethereum);
+      try {
+        await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: netConfig.chainId }] });
+      } catch (switchErr) {
+        if (switchErr.code === 4902 && network === 'BSC') {
+          await window.ethereum.request({ method: 'wallet_addEthereumChain', params: [{ chainId: '0x38', chainName: 'BNB Smart Chain', nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 }, rpcUrls: ['https://bsc-dataseed.binance.org/'], blockExplorerUrls: ['https://bscscan.com/'] }] });
+        } else { throw switchErr; }
       }
 
-      // Step 2: Create signer and contract
-      showNotification('Preparing USDT transfer...', 'info');
-      const web3Provider = new ethers.providers.Web3Provider(window.ethereum);
-      const signer = web3Provider.getSigner(walletAddress);
-      const usdtContract = new ethers.Contract(USDT_ADDRESS, USDT_ABI, signer);
-
-      // Step 3: Convert amount to USDT decimals (6 decimals)
-      const amountInWei = ethers.utils.parseUnits(amount.toString(), 6);
-
-      // Step 4: Send transfer transaction
       showNotification('Please confirm the transaction in your wallet...', 'info');
-      const tx = await usdtContract.transfer(settings.platformWallet, amountInWei);
+      const signer = web3Provider.getSigner();
+      const usdtContract = new ethers.Contract(netConfig.address, USDT_ABI, signer);
+      const amountInWei = ethers.utils.parseUnits(amount.toString(), netConfig.decimals);
+      const tx = await usdtContract.transfer(platformAddr, amountInWei);
 
       showNotification('Transaction submitted! Waiting for confirmation...', 'info');
-
-      // Step 5: Wait for 1 confirmation
       const receipt = await tx.wait(1);
-
-      if (receipt.status === 0) {
-        showNotification('Transaction failed on-chain', 'error');
-        setLoading(false);
-        return;
-      }
+      if (receipt.status === 0) { showNotification('Transaction failed on-chain', 'error'); setLoading(false); return; }
 
       showNotification('Transaction confirmed! Verifying...', 'info');
-
-      // Step 6: Send tx hash to backend for verification
       const response = await fetch(`${API_BASE}/api/stake`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          walletAddress,
-          amount,
-          type: 'stake',
-          txHash: tx.hash
-        })
+        body: JSON.stringify({ walletAddress, amount, type: 'stake', txHash: tx.hash })
       });
 
       if (response.ok) {
-        showNotification(`Successfully staked ${amount} USDT!`, 'success');
+        showNotification(`Successfully staked ${amount} USDT on ${network}!`, 'success');
         setStakeAmount('');
-        await fetchUserData();
-        await fetchTransactions();
-        await fetchWalletBalance();
+        await fetchUserData(); await fetchTransactions(); await fetchWalletBalance();
       } else {
-        const error = await response.json();
-        showNotification(error.message || 'Backend verification failed', 'error');
+        const err = await response.json();
+        showNotification(err.message || 'Backend verification failed', 'error');
       }
     } catch (error) {
       console.error('Stake error:', error);
-      if (error.code === 4001 || error.code === 'ACTION_REJECTED') {
-        showNotification('Transaction rejected by user', 'error');
-      } else if (error.message?.includes('insufficient funds')) {
-        showNotification('Insufficient ETH for gas fees', 'error');
+      if (error.code === 4001 || error.code === 'ACTION_REJECTED') showNotification('Transaction rejected', 'error');
+      else if (error.message?.includes('insufficient funds')) showNotification('Insufficient funds for gas', 'error');
+      else showNotification(error.reason || error.message || 'Failed to stake. Please try again.', 'error');
+    } finally { setLoading(false); }
+  };
+
+  // Manual deposit for TRX / BTC — user sends manually then submits tx hash
+  const handleManualDeposit = async () => {
+    const amount = parseFloat(stakeAmount);
+    if (!amount || amount <= 0) { showNotification('Enter the amount you sent', 'error'); return; }
+    if (!manualTxHash.trim()) { showNotification('Enter your transaction hash / ID', 'error'); return; }
+
+    setManualDepositLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/stake/manual`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ walletAddress, amount, txHash: manualTxHash.trim(), network })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showNotification(data.message || 'Deposit submitted for review!', 'success');
+        setStakeAmount(''); setManualTxHash('');
+        await fetchTransactions();
       } else {
-        showNotification(error.reason || error.message || 'Failed to stake. Please try again.', 'error');
+        showNotification(data.message || 'Submission failed', 'error');
       }
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) {
+      showNotification('Network error. Please try again.', 'error');
+    } finally { setManualDepositLoading(false); }
   };
 
   // Handle unstake
@@ -1067,65 +1106,72 @@ function Dashboard({ walletAddress, onDisconnect }) {
             <div className="stake-section">
               <div className="stake-grid">
                 <div className="stake-panel">
-                  <h2 className="panel-title">Stake USDT</h2>
+                  {/* Network badge */}
+                  <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'14px'}}>
+                    <h2 className="panel-title" style={{margin:0}}>Stake</h2>
+                    <span style={{fontSize:'0.72rem',fontWeight:700,padding:'3px 10px',borderRadius:'20px',background: network==='BSC'?'#f0b90b': network==='ETH'?'#627eea': network==='TRX'?'#ef4444':'#f7931a',color: network==='ETH'?'#fff':'#000'}}>
+                      {network}
+                    </span>
+                  </div>
 
-                  {/* Network warning */}
-                  <div style={{background:'rgba(234,179,8,0.12)',border:'1px solid rgba(234,179,8,0.4)',borderRadius:'10px',padding:'12px 14px',marginBottom:'16px'}}>
-                    <div style={{display:'flex',alignItems:'flex-start',gap:'10px'}}>
-                      <span style={{fontSize:'1.1rem',flexShrink:0}}>⚠️</span>
-                      <div style={{fontSize:'0.82rem',color:'#fde68a',lineHeight:'1.5'}}>
-                        <strong style={{display:'block',marginBottom:'4px',color:'#fbbf24'}}>Important: Use BEP-20 (BSC) Network Only</strong>
-                        Send <strong>USDT on BNB Smart Chain (BEP-20)</strong> to stake. Sending on the wrong network (Ethereum ERC-20 or Tron TRC-20) will result in an undetected deposit and your stake will not be credited.
-                      </div>
+                  {/* EVM networks (BSC / ETH) — automatic MetaMask transfer */}
+                  {(network === 'BSC' || network === 'ETH') && (<>
+                    <div style={{background:'rgba(16,185,129,0.08)',border:'1px solid rgba(16,185,129,0.2)',borderRadius:'10px',padding:'10px 14px',marginBottom:'14px',fontSize:'0.8rem',color:'#94a3b8'}}>
+                      ✅ Your wallet will auto-switch to <strong style={{color:'#e2e8f0'}}>{network === 'BSC' ? 'BNB Smart Chain (BEP-20)' : 'Ethereum Mainnet (ERC-20)'}</strong> and send USDT directly to the platform wallet.
                     </div>
-                  </div>
-
-                  <div className="balance-display">
-                    <span>Wallet USDT Balance</span>
-                    <span className="balance-value">{formatNumber(usdtBalance)} USDT</span>
-                  </div>
-                  <div className="balance-display" style={{marginTop:'8px',opacity:0.7}}>
-                    <span>Already Staked</span>
-                    <span className="balance-value" style={{color:'#6366f1'}}>{formatNumber(userData.stakedAmount)} USDT</span>
-                  </div>
-                  <div className="input-group">
-                    <input
-                      type="number"
-                      placeholder="Enter amount to stake"
-                      value={stakeAmount}
-                      onChange={(e) => setStakeAmount(e.target.value)}
-                      className="stake-input"
-                      disabled={loading}
-                    />
-                    <button className="max-btn" onClick={() => setStakeAmount(usdtBalance)} disabled={loading}>
-                      MAX
+                    <div className="balance-display">
+                      <span>Wallet USDT Balance</span>
+                      <span className="balance-value">{formatNumber(usdtBalance)} USDT</span>
+                    </div>
+                    <div className="balance-display" style={{marginTop:'8px',opacity:0.7}}>
+                      <span>Already Staked</span>
+                      <span className="balance-value" style={{color:'#6366f1'}}>{formatNumber(userData.stakedAmount)} USDT</span>
+                    </div>
+                    <div className="input-group">
+                      <input type="number" placeholder="Enter amount to stake" value={stakeAmount} onChange={(e) => setStakeAmount(e.target.value)} className="stake-input" disabled={loading} />
+                      <button className="max-btn" onClick={() => setStakeAmount(usdtBalance)} disabled={loading}>MAX</button>
+                    </div>
+                    <div className="quick-amounts">
+                      {['100','500','1000','5000'].map(v => <button key={v} onClick={() => setStakeAmount(v)} disabled={loading}>{parseInt(v).toLocaleString()}</button>)}
+                    </div>
+                    <div className="stake-info">
+                      <div className="info-row"><span>Current APY</span><span className="info-value">{getCurrentAPY()}% Annual</span></div>
+                      <div className="info-row"><span>Est. Daily Earnings</span><span className="info-value">{stakeAmount ? ((parseFloat(stakeAmount) * (parseFloat(getCurrentAPY()) / 100)) / 365).toFixed(4) : '0.00'} USDT</span></div>
+                    </div>
+                    <button className="stake-btn primary" onClick={handleStake} disabled={loading || !stakeAmount}>
+                      {loading ? 'Processing...' : `Stake Now on ${network}`}
                     </button>
-                  </div>
-                  <div className="quick-amounts">
-                    <button onClick={() => setStakeAmount('100')} disabled={loading}>100</button>
-                    <button onClick={() => setStakeAmount('500')} disabled={loading}>500</button>
-                    <button onClick={() => setStakeAmount('1000')} disabled={loading}>1,000</button>
-                    <button onClick={() => setStakeAmount('5000')} disabled={loading}>5,000</button>
-                  </div>
-                  <div className="stake-info">
-                    <div className="info-row">
-                      <span>Current APY</span>
-                      <span className="info-value">{getCurrentAPY()}% Annual</span>
+                  </>)}
+
+                  {/* Manual networks (TRX / BTC) — user sends manually, submits tx hash */}
+                  {(network === 'TRX' || network === 'BTC') && (<>
+                    <div style={{background:'rgba(239,68,68,0.08)',border:'1px solid rgba(239,68,68,0.2)',borderRadius:'10px',padding:'12px 14px',marginBottom:'14px',fontSize:'0.82rem',color:'#94a3b8'}}>
+                      <strong style={{color:'#f87171',display:'block',marginBottom:'4px'}}>Manual Deposit — {network === 'TRX' ? 'TRC-20 USDT' : 'Native BTC'}</strong>
+                      Send {network === 'TRX' ? 'USDT (TRC-20)' : 'BTC'} to the address below, then paste your transaction ID to submit for review.
                     </div>
-                    <div className="info-row">
-                      <span>Estimated Daily Earnings</span>
-                      <span className="info-value">
-                        {stakeAmount ? ((parseFloat(stakeAmount) * (parseFloat(getCurrentAPY()) / 100)) / 365).toFixed(4) : '0.00'} USDT
-                      </span>
+
+                    {/* Platform deposit address */}
+                    <DepositAddress network={network} apiBase={API_BASE} />
+
+                    <div style={{marginTop:'16px',marginBottom:'8px',fontSize:'0.82rem',color:'#94a3b8',fontWeight:600}}>Amount Sent ({network === 'TRX' ? 'USDT' : 'BTC'})</div>
+                    <div className="input-group">
+                      <input type="number" placeholder={`Amount you sent (e.g. 100)`} value={stakeAmount} onChange={(e) => setStakeAmount(e.target.value)} className="stake-input" disabled={manualDepositLoading} />
                     </div>
-                  </div>
-                  <button
-                    className="stake-btn primary"
-                    onClick={handleStake}
-                    disabled={loading || !stakeAmount}
-                  >
-                    {loading ? 'Processing...' : 'Stake Now'}
-                  </button>
+
+                    <div style={{marginTop:'12px',marginBottom:'8px',fontSize:'0.82rem',color:'#94a3b8',fontWeight:600}}>Transaction Hash / ID</div>
+                    <input
+                      type="text"
+                      placeholder={network === 'TRX' ? 'Paste TRX transaction ID...' : 'Paste BTC transaction ID...'}
+                      value={manualTxHash}
+                      onChange={(e) => setManualTxHash(e.target.value)}
+                      style={{width:'100%',padding:'0.75rem 1rem',background:'rgba(255,255,255,0.06)',border:'1px solid rgba(255,255,255,0.12)',borderRadius:'10px',color:'#fff',fontSize:'0.82rem',fontFamily:'monospace',boxSizing:'border-box',marginBottom:'16px'}}
+                      disabled={manualDepositLoading}
+                    />
+                    <button className="stake-btn primary" onClick={handleManualDeposit} disabled={manualDepositLoading || !stakeAmount || !manualTxHash.trim()}>
+                      {manualDepositLoading ? 'Submitting...' : 'Submit Deposit for Review'}
+                    </button>
+                    <p style={{fontSize:'0.75rem',color:'#64748b',marginTop:'10px',textAlign:'center'}}>Admin will verify your transaction and credit your staked balance within minutes.</p>
+                  </>)}
                 </div>
 
                 <div className="stake-panel">

