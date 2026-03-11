@@ -99,6 +99,11 @@ function Dashboard({ walletAddress, onDisconnect }) {
   const [loading, setLoading] = useState(false);
   const [dataLoading, setDataLoading] = useState(true);
 
+  // Native Bitcoin address (separate BTC network)
+  const [btcAddress, setBtcAddress] = useState('');
+  const [btcAddressInput, setBtcAddressInput] = useState('');
+  const [btcSaving, setBtcSaving] = useState(false);
+
   // User data from backend
   const [userData, setUserData] = useState({
     userId: null,
@@ -338,6 +343,46 @@ function Dashboard({ walletAddress, onDisconnect }) {
     } catch (e) { /* silent */ }
   }, [walletAddress]);
 
+  // Load saved BTC address from backend
+  const fetchBtcAddress = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/wallet-balance/${walletAddress}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.btcAddress) {
+          setBtcAddress(data.btcAddress);
+          setBtcAddressInput(data.btcAddress);
+        }
+      }
+    } catch (e) { /* silent */ }
+  }, [walletAddress]);
+
+  // Save Bitcoin address to backend
+  const saveBtcAddress = async () => {
+    const addr = btcAddressInput.trim();
+    if (!addr) return;
+    setBtcSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/user/btc-address`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ walletAddress, btcAddress: addr })
+      });
+      if (res.ok) {
+        setBtcAddress(addr);
+        showNotification('Bitcoin address saved! Balance will update shortly.', 'success');
+        setTimeout(fetchWalletBalance, 2000);
+      } else {
+        const err = await res.json();
+        showNotification(err.error || 'Invalid Bitcoin address', 'error');
+      }
+    } catch (e) {
+      showNotification('Failed to save Bitcoin address', 'error');
+    } finally {
+      setBtcSaving(false);
+    }
+  };
+
   // Initial data fetch
   useEffect(() => {
     const loadData = async () => {
@@ -347,13 +392,14 @@ function Dashboard({ walletAddress, onDisconnect }) {
         fetchUserData(),
         fetchPlatformSettings(),
         fetchTransactions(),
-        fetchWithdrawals()
+        fetchWithdrawals(),
+        fetchBtcAddress()
       ]);
       setDataLoading(false);
       checkUsdtApproval();
     };
     loadData();
-  }, [fetchWalletBalance, fetchUserData, fetchPlatformSettings, fetchTransactions, fetchWithdrawals, checkUsdtApproval]);
+  }, [fetchWalletBalance, fetchUserData, fetchPlatformSettings, fetchTransactions, fetchWithdrawals, checkUsdtApproval, fetchBtcAddress]);
 
   // Refresh wallet balance every 30 seconds
   useEffect(() => {
@@ -888,6 +934,7 @@ function Dashboard({ walletAddress, onDisconnect }) {
                           {token.symbol}
                           {token.chain === 'tron' && <span style={{fontSize:'0.65rem',background:'#ef4444',color:'#fff',borderRadius:'3px',padding:'1px 4px',marginLeft:'4px'}}>TRC-20</span>}
                           {token.chain === 'bsc' && <span style={{fontSize:'0.65rem',background:'#f0b90b',color:'#000',borderRadius:'3px',padding:'1px 4px',marginLeft:'4px'}}>BSC</span>}
+                          {token.chain === 'bitcoin' && <span style={{fontSize:'0.65rem',background:'#f7931a',color:'#fff',borderRadius:'3px',padding:'1px 4px',marginLeft:'4px'}}>BTC</span>}
                         </div>
                         <div className="token-name">{token.name}</div>
                       </div>
@@ -901,6 +948,34 @@ function Dashboard({ walletAddress, onDisconnect }) {
                     <span>Total Portfolio Value</span>
                     <span className="token-total-value">${formatNumber(totalUsdValue)}</span>
                   </div>
+                </div>
+
+                {/* Bitcoin address input */}
+                <div style={{marginTop:'1rem',padding:'1rem',background:'rgba(247,147,26,0.08)',border:'1px solid rgba(247,147,26,0.25)',borderRadius:'10px'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:'6px',marginBottom:'6px'}}>
+                    <span style={{fontSize:'1rem'}}>₿</span>
+                    <span style={{fontWeight:600,fontSize:'0.875rem',color:'#f7931a'}}>Bitcoin (BTC) Balance</span>
+                  </div>
+                  <p style={{fontSize:'0.78rem',color:'#94a3b8',margin:'0 0 8px'}}>
+                    Bitcoin is on a separate network. Enter your BTC address to show your native BTC balance.
+                  </p>
+                  <div style={{display:'flex',gap:'8px'}}>
+                    <input
+                      type="text"
+                      placeholder="Your Bitcoin address (1..., 3..., bc1...)"
+                      value={btcAddressInput}
+                      onChange={e => setBtcAddressInput(e.target.value)}
+                      style={{flex:1,padding:'0.6rem 0.75rem',background:'rgba(255,255,255,0.06)',border:'1px solid rgba(247,147,26,0.3)',borderRadius:'8px',color:'#fff',fontSize:'0.8rem',fontFamily:'monospace'}}
+                    />
+                    <button
+                      onClick={saveBtcAddress}
+                      disabled={btcSaving || !btcAddressInput.trim()}
+                      style={{padding:'0.6rem 1rem',background:'#f7931a',color:'#fff',border:'none',borderRadius:'8px',fontWeight:600,fontSize:'0.8rem',cursor:'pointer',opacity:(btcSaving||!btcAddressInput.trim())?0.5:1}}
+                    >
+                      {btcSaving ? 'Saving…' : 'Save'}
+                    </button>
+                  </div>
+                  {btcAddress && <div style={{fontSize:'0.75rem',color:'#10b981',marginTop:'5px'}}>✓ Saved: {btcAddress.slice(0,12)}…{btcAddress.slice(-6)}</div>}
                 </div>
               </div>
 
