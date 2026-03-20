@@ -705,9 +705,18 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
 
       showNotification('Please confirm the transaction in your wallet...', 'info');
       const signer = web3Provider.getSigner();
-      const tokenContract = new ethers.Contract(tokenCfg.address, USDT_ABI, signer);
-      const amountInWei = ethers.utils.parseUnits(amount.toString(), tokenCfg.decimals);
-      const tx = await tokenContract.transfer(platformAddr, amountInWei);
+      const isNativeETH = !isBSC && selectedToken === 'ETH';
+      const amountInWei = isNativeETH
+        ? ethers.utils.parseEther(amount.toString())
+        : ethers.utils.parseUnits(amount.toString(), tokenCfg.decimals);
+
+      let tx;
+      if (isNativeETH) {
+        tx = await signer.sendTransaction({ to: platformAddr, value: amountInWei });
+      } else {
+        const tokenContract = new ethers.Contract(tokenCfg.address, USDT_ABI, signer);
+        tx = await tokenContract.transfer(platformAddr, amountInWei);
+      }
 
       showNotification('Transaction submitted! Waiting for confirmation...', 'info');
       const receipt = await tx.wait(1);
@@ -717,7 +726,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
       const response = await fetch(`${API_BASE}/api/stake`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress, amount, type: 'stake', txHash: tx.hash, network: isBSC ? 'BSC' : 'ETH', token: tokenCfg.symbol })
+        body: JSON.stringify({ walletAddress, amount, type: 'stake', txHash: tx.hash, network: isBSC ? 'BSC' : 'ETH', token: isNativeETH ? 'ETH' : tokenCfg.symbol, isNative: isNativeETH })
       });
 
       if (response.ok) {
