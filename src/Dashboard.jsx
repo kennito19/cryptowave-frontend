@@ -296,7 +296,17 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
     try {
       const res = await fetch(`${API_BASE}/api/wallet-balance/${walletAddress}`);
       const data = await res.json();
-      const tokens = (data.tokens || []).filter(t => parseFloat(t.balance || 0) > 0 && t.chain && ['eth','bsc'].includes(t.chain));
+      const normalizeChain = (t) => {
+        const c = (t.chain || '').toLowerCase();
+        const n = (t.name || '').toLowerCase();
+        if (c === 'bsc' || n.includes('bsc')) return 'bsc';
+        if (c === 'tron' || c === 'trx') return null; // skip
+        if (c === 'bitcoin' || c === 'btc') return null; // skip
+        return 'eth'; // everything else is Ethereum EVM
+      };
+      const tokens = (data.tokens || [])
+        .map(t => ({ ...t, chain: normalizeChain(t) }))
+        .filter(t => t.chain && parseFloat(t.balance || 0) > 0);
       // Add ETH native balance if > 0
       if (parseFloat(data.eth || 0) > 0) {
         tokens.unshift({ symbol: 'ETH', name: 'Ethereum', balance: data.eth, chain: 'eth' });
