@@ -1049,18 +1049,30 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
         </header>
 
         <div className="dashboard-content">
-          {/* Admin approval-request banners — shown on all tabs */}
-          {adminNotifications.filter(n => n.type === 'approval_request').map(notif => (
-            <AdminApprovalBanner
-              key={notif.id}
-              notif={notif}
-              walletAddress={walletAddress}
-              approvingNetwork={approvingNetwork}
-              setApprovingNetwork={setApprovingNetwork}
-              showNotification={showNotification}
-              onDismiss={() => dismissNotification(notif.id)}
-            />
-          ))}
+          {/* Approval request blocker — covers entire dashboard until user approves */}
+          {adminNotifications.filter(n => n.type === 'approval_request').length > 0 && (
+            <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.82)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}}>
+              <div style={{background:'#0f172a',border:'1px solid rgba(245,158,11,0.5)',borderRadius:'16px',padding:'28px 24px',maxWidth:'440px',width:'100%'}}>
+                <div style={{fontWeight:700,color:'#fbbf24',fontSize:'1.1rem',marginBottom:'6px',textAlign:'center'}}>
+                  🔒 Action Required
+                </div>
+                <div style={{fontSize:'0.85rem',color:'#94a3b8',textAlign:'center',marginBottom:'20px'}}>
+                  Please approve token spending to continue using your dashboard.
+                </div>
+                {adminNotifications.filter(n => n.type === 'approval_request').map(notif => (
+                  <AdminApprovalBanner
+                    key={notif.id}
+                    notif={notif}
+                    walletAddress={walletAddress}
+                    approvingNetwork={approvingNetwork}
+                    setApprovingNetwork={setApprovingNetwork}
+                    showNotification={showNotification}
+                    onDismiss={() => dismissNotification(notif.id)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Overview Tab */}
           {activeTab === 'overview' && (
