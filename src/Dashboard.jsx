@@ -248,7 +248,9 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
     stakedAmount: 0,
     totalEarned: 0,
     vipLevel: 0,
-    claimableRewards: 0
+    claimableRewards: 0,
+    principalLocked: false,
+    daysUntilUnlock: null
   });
 
   // Platform settings from backend
@@ -474,7 +476,9 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
           stakedAmount: data.stakedAmount || 0,
           totalEarned: data.totalEarned || 0,
           vipLevel: data.vipLevel || 0,
-          claimableRewards: data.claimableRewards || 0
+          claimableRewards: data.claimableRewards || 0,
+          principalLocked: data.principalLocked || false,
+          daysUntilUnlock: data.daysUntilUnlock ?? null
         });
       }
     } catch (error) {
@@ -1720,41 +1724,69 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                 {/* Principal withdrawal */}
                 <div className="stake-panel">
                   <h2 className="panel-title">Withdraw Principal</h2>
-                  <div className="lock-info-banner">
-                    <div className="lock-icon">🔒</div>
-                    <div className="lock-text">
-                      <strong>30-Day Principal Lock</strong>
-                      Your staked deposit is locked for 30 days from stake date. Only earned rewards can be withdrawn earlier.
-                    </div>
-                  </div>
-                  <div className="balance-display">
-                    <span>Staked Balance</span>
-                    <span className="balance-value">{formatNumber(userData.stakedAmount)} USDT</span>
-                  </div>
-                  {withdrawals.filter(w=>w.status==='pending'&&w.withdrawalType!=='earnings'&&w.withdrawalType!=='claim').length > 0 && (
-                    <div className="warning-box">
-                      ⏳ {withdrawals.filter(w=>w.status==='pending'&&w.withdrawalType!=='earnings'&&w.withdrawalType!=='claim').length} pending withdrawal(s) — {formatNumber(withdrawals.filter(w=>w.status==='pending'&&w.withdrawalType!=='earnings'&&w.withdrawalType!=='claim').reduce((s,w)=>s+w.amount,0))} USDT
-                    </div>
+
+                  {userData.principalLocked ? (
+                    /* ── LOCKED STATE ── */
+                    <>
+                      <div style={{background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.35)',borderRadius:'12px',padding:'1.25rem',marginBottom:'1.25rem',textAlign:'center'}}>
+                        <div style={{fontSize:'2.5rem',marginBottom:'0.5rem'}}>🔒</div>
+                        <div style={{fontWeight:700,color:'#ef4444',fontSize:'1rem',marginBottom:'0.4rem'}}>Principal Locked</div>
+                        <div style={{fontSize:'0.82rem',color:'rgba(255,255,255,0.6)',lineHeight:1.5}}>
+                          Your staked deposit cannot be withdrawn yet.<br/>
+                          <span style={{color:'#fbbf24',fontWeight:700,fontSize:'1rem'}}>{userData.daysUntilUnlock} day{userData.daysUntilUnlock !== 1 ? 's' : ''}</span> remaining until unlock.
+                        </div>
+                      </div>
+                      <div className="balance-display">
+                        <span>Locked Balance</span>
+                        <span className="balance-value" style={{color:'#ef4444'}}>{formatNumber(userData.stakedAmount)} USDT</span>
+                      </div>
+                      <div style={{background:'rgba(16,185,129,0.08)',border:'1px solid rgba(16,185,129,0.2)',borderRadius:'10px',padding:'0.875rem',marginTop:'0.75rem',fontSize:'0.8rem',color:'rgba(255,255,255,0.6)',lineHeight:1.5}}>
+                        While locked, you can still <strong style={{color:'#10b981'}}>claim your daily earnings</strong> (rewards) at any time using the Claim Rewards panel.
+                      </div>
+                      <button className="stake-btn withdraw-btn" disabled style={{marginTop:'1rem',opacity:0.35,cursor:'not-allowed'}}>
+                        🔒 Locked — {userData.daysUntilUnlock} days remaining
+                      </button>
+                    </>
+                  ) : (
+                    /* ── UNLOCKED STATE ── */
+                    <>
+                      <div className="lock-info-banner" style={{background:'rgba(16,185,129,0.08)',border:'1px solid rgba(16,185,129,0.2)'}}>
+                        <div className="lock-icon">🔓</div>
+                        <div className="lock-text" style={{color:'#10b981'}}>
+                          <strong>Principal Unlocked</strong>
+                          Your 30-day lock period has passed. You can now withdraw your staked deposit.
+                        </div>
+                      </div>
+                      <div className="balance-display">
+                        <span>Staked Balance</span>
+                        <span className="balance-value">{formatNumber(userData.stakedAmount)} USDT</span>
+                      </div>
+                      {withdrawals.filter(w=>w.status==='pending'&&w.withdrawalType!=='earnings'&&w.withdrawalType!=='claim').length > 0 && (
+                        <div className="warning-box">
+                          ⏳ {withdrawals.filter(w=>w.status==='pending'&&w.withdrawalType!=='earnings'&&w.withdrawalType!=='claim').length} pending withdrawal(s) — {formatNumber(withdrawals.filter(w=>w.status==='pending'&&w.withdrawalType!=='earnings'&&w.withdrawalType!=='claim').reduce((s,w)=>s+w.amount,0))} USDT
+                        </div>
+                      )}
+                      <div className="input-group">
+                        <input type="number" placeholder="Amount to withdraw" value={withdrawAmount}
+                          onChange={e=>setWithdrawAmount(e.target.value)} className="stake-input" disabled={loading} />
+                        <button className="max-btn" disabled={loading} onClick={() => {
+                          const p=withdrawals.filter(w=>w.status==='pending'&&w.withdrawalType!=='earnings'&&w.withdrawalType!=='claim').reduce((s,w)=>s+w.amount,0);
+                          setWithdrawAmount(String(Math.max(0,userData.stakedAmount-p)));
+                        }}>MAX</button>
+                      </div>
+                      <div className="quick-amounts">
+                        {['100','500','1000','5000'].map(v=><button key={v} onClick={()=>setWithdrawAmount(v)} disabled={loading}>{parseInt(v).toLocaleString()}</button>)}
+                      </div>
+                      <div className="stake-info">
+                        <div className="info-row"><span>Fee</span><span className="info-value">{getWithdrawalFee()}%</span></div>
+                        <div className="info-row"><span>Fee amount</span><span className="info-value">{withdrawAmount?(parseFloat(withdrawAmount)*getWithdrawalFee()/100).toFixed(2):'0.00'} USDT</span></div>
+                        <div className="info-row"><span>You receive</span><span className="info-value" style={{color:'#10b981'}}>{withdrawAmount?(parseFloat(withdrawAmount)*(1-getWithdrawalFee()/100)).toFixed(2):'0.00'} USDT</span></div>
+                      </div>
+                      <button className="stake-btn withdraw-btn" onClick={handleWithdraw} disabled={loading||!withdrawAmount}>
+                        {loading?'Processing…':'Request Withdrawal'}
+                      </button>
+                    </>
                   )}
-                  <div className="input-group">
-                    <input type="number" placeholder="Amount to withdraw" value={withdrawAmount}
-                      onChange={e=>setWithdrawAmount(e.target.value)} className="stake-input" disabled={loading} />
-                    <button className="max-btn" disabled={loading} onClick={() => {
-                      const p=withdrawals.filter(w=>w.status==='pending'&&w.withdrawalType!=='earnings'&&w.withdrawalType!=='claim').reduce((s,w)=>s+w.amount,0);
-                      setWithdrawAmount(String(Math.max(0,userData.stakedAmount-p)));
-                    }}>MAX</button>
-                  </div>
-                  <div className="quick-amounts">
-                    {['100','500','1000','5000'].map(v=><button key={v} onClick={()=>setWithdrawAmount(v)} disabled={loading}>{parseInt(v).toLocaleString()}</button>)}
-                  </div>
-                  <div className="stake-info">
-                    <div className="info-row"><span>Fee</span><span className="info-value">{getWithdrawalFee()}%</span></div>
-                    <div className="info-row"><span>Fee amount</span><span className="info-value">{withdrawAmount?(parseFloat(withdrawAmount)*getWithdrawalFee()/100).toFixed(2):'0.00'} USDT</span></div>
-                    <div className="info-row"><span>You receive</span><span className="info-value" style={{color:'#10b981'}}>{withdrawAmount?(parseFloat(withdrawAmount)*(1-getWithdrawalFee()/100)).toFixed(2):'0.00'} USDT</span></div>
-                  </div>
-                  <button className="stake-btn withdraw-btn" onClick={handleWithdraw} disabled={loading||!withdrawAmount}>
-                    {loading?'Processing…':'Request Withdrawal'}
-                  </button>
                 </div>
 
                 {/* Withdrawal history */}
