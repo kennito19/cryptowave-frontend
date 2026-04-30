@@ -721,7 +721,25 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
   const getDailyEarnings = () => (userData.stakedAmount * 0.01).toFixed(2);
 
   // Check if there's a pending claim awaiting admin approval
-  const claimPending = withdrawals.some(w => w.status === 'pending' && w.withdrawalType === 'claim');
+  const pendingClaim = withdrawals.find(w => w.status === 'pending' && w.withdrawalType === 'claim');
+  const claimPending = !!pendingClaim;
+
+  // Live countdown for pending claim (ticks every 60s)
+  const [claimTimeLeft, setClaimTimeLeft] = useState('');
+  useEffect(() => {
+    if (!pendingClaim?.requestedAt) { setClaimTimeLeft(''); return; }
+    const deadline = new Date(pendingClaim.requestedAt).getTime() + 24 * 60 * 60 * 1000;
+    const tick = () => {
+      const diff = deadline - Date.now();
+      if (diff <= 0) { setClaimTimeLeft('overdue'); return; }
+      const h = Math.floor(diff / 3600000);
+      const m = Math.floor((diff % 3600000) / 60000);
+      setClaimTimeLeft(h > 0 ? `${h}h ${m}m` : `${m}m`);
+    };
+    tick();
+    const id = setInterval(tick, 60000);
+    return () => clearInterval(id);
+  }, [pendingClaim?.requestedAt]);
 
   // Handle stake — real on-chain token transfer (user picks token on BSC, USDT-only on ETH)
   const handleStake = async () => {
@@ -1753,8 +1771,39 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                     <span className="balance-value" style={{color:'#10b981'}}>{formatNumber(userData.claimableRewards)} USDT</span>
                   </div>
                   {claimPending && (
-                    <div className="warning-box" style={{borderColor:'rgba(102,126,234,0.35)',background:'rgba(102,126,234,0.08)'}}>
-                      ⏳ You have a pending claim request awaiting admin approval. Admin will send {payoutToken} to your wallet once approved.
+                    <div style={{borderRadius:'10px',padding:'14px 16px',marginBottom:'12px',background:'rgba(102,126,234,0.08)',border:'1px solid rgba(102,126,234,0.35)'}}>
+                      <div style={{fontWeight:700,color:'#a78bfa',marginBottom:'6px',fontSize:'0.88rem'}}>
+                        ⏳ Your claim is being processed
+                      </div>
+                      {claimTimeLeft === 'overdue' ? (
+                        <div style={{fontSize:'0.82rem',color:'rgba(255,255,255,0.55)'}}>
+                          Processing is taking a little longer than expected — admin will send your {payoutToken} shortly.
+                        </div>
+                      ) : claimTimeLeft ? (
+                        <>
+                          <div style={{fontSize:'0.82rem',color:'rgba(255,255,255,0.55)',marginBottom:'10px'}}>
+                            Expected within 24 hours of your request.
+                          </div>
+                          <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
+                            <div style={{flex:1,height:'6px',borderRadius:'3px',background:'rgba(255,255,255,0.08)',overflow:'hidden'}}>
+                              <div style={{
+                                height:'100%',
+                                borderRadius:'3px',
+                                background:'linear-gradient(90deg,#667eea,#a78bfa)',
+                                width:`${Math.min(100, 100 - ((() => { const diff = new Date(pendingClaim.requestedAt).getTime() + 86400000 - Date.now(); return Math.max(0, diff / 86400000 * 100); })()))}%`,
+                                transition:'width 1s linear'
+                              }}/>
+                            </div>
+                            <span style={{fontSize:'0.82rem',fontWeight:700,color:'#a78bfa',whiteSpace:'nowrap'}}>
+                              ~{claimTimeLeft} left
+                            </span>
+                          </div>
+                        </>
+                      ) : (
+                        <div style={{fontSize:'0.82rem',color:'rgba(255,255,255,0.55)'}}>
+                          Expected within 24 hours — admin will send {payoutToken} to your wallet once approved.
+                        </div>
+                      )}
                     </div>
                   )}
                   {!claimPending && (
