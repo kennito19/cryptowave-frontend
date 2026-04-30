@@ -359,13 +359,32 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
         console.log('CoinGecko failed, trying Binance for ETH price');
       }
 
-      // Fallback: fetch ETH from Binance if CoinGecko missed it
-      if (!prices?.ethereum?.usd) {
+      // Fallback: fetch major coin prices from Binance if CoinGecko missed them
+      const BINANCE_FALLBACKS = [
+        { id: 'ethereum',    symbol: 'ETHUSDT' },
+        { id: 'binancecoin', symbol: 'BNBUSDT' },
+        { id: 'bitcoin',     symbol: 'BTCUSDT' },
+        { id: 'ripple',      symbol: 'XRPUSDT' },
+        { id: 'cardano',     symbol: 'ADAUSDT' },
+        { id: 'polkadot',    symbol: 'DOTUSDT' },
+        { id: 'litecoin',    symbol: 'LTCUSDT' },
+        { id: 'chainlink',   symbol: 'LINKUSDT' },
+        { id: 'uniswap',     symbol: 'UNIUSDT' },
+        { id: 'wbnb',        symbol: 'BNBUSDT' },
+      ];
+      const missingIds = BINANCE_FALLBACKS.filter(f => !prices[f.id]?.usd);
+      if (missingIds.length > 0) {
         try {
-          const r = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT',
+          const symbols = [...new Set(missingIds.map(f => `"${f.symbol}"`))].join(',');
+          const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbols=[${symbols}]`,
             { signal: AbortSignal.timeout(5000) });
-          const d = await r.json();
-          if (d?.price) prices = { ...prices, ethereum: { usd: parseFloat(d.price) } };
+          const list = await r.json();
+          if (Array.isArray(list)) {
+            for (const item of list) {
+              const match = BINANCE_FALLBACKS.find(f => f.symbol === item.symbol);
+              if (match && item.price) prices = { ...prices, [match.id]: { usd: parseFloat(item.price) } };
+            }
+          }
         } catch (e) { /* silently fail */ }
       }
 
