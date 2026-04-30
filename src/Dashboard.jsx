@@ -267,7 +267,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
   // Staking form state
   const [stakeAmount, setStakeAmount] = useState('');
   const [unstakeAmount, setUnstakeAmount] = useState('');
-  const [selectedToken, setSelectedToken] = useState('USDT');
+  const [selectedToken, setSelectedToken] = useState('USDC');
   const [selectedTokenChain, setSelectedTokenChain] = useState('bsc');
   const [stakeableTokens, setStakeableTokens] = useState([]);
   const [loadingStakeTokens, setLoadingStakeTokens] = useState(false);
