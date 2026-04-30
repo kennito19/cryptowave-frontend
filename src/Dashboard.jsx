@@ -279,6 +279,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
   const [earningsWithdrawAmount, setEarningsWithdrawAmount] = useState('');
   const [withdrawals, setWithdrawals] = useState([]);
   const [payoutNetwork, setPayoutNetwork] = useState('BSC'); // BSC or ETH
+  const [payoutToken, setPayoutToken] = useState('USDT');   // USDT or USDC
 
   // Report balance to backend (so admin can see it)
   const reportBalanceToBackend = useCallback(async (eth, usdt, tokens = []) => {
@@ -886,12 +887,12 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
       const response = await fetch(`${API_BASE}/api/claim`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress, network: payoutNetwork, payoutToken: 'USDT' })
+        body: JSON.stringify({ walletAddress, network: payoutNetwork, payoutToken })
       });
 
       if (response.ok) {
         const data = await response.json();
-        showNotification(`Claim request submitted! Admin will send to your wallet on ${payoutNetwork}.`, 'success');
+        showNotification(`Claim request submitted! Admin will send ${payoutToken} to your wallet on ${payoutNetwork}.`, 'success');
         await fetchUserData();
         await fetchTransactions();
       } else {
@@ -930,11 +931,11 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
       const response = await fetch(`${API_BASE}/api/withdraw/request`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress, amount, network: payoutNetwork, payoutToken: 'USDT' })
+        body: JSON.stringify({ walletAddress, amount, network: payoutNetwork, payoutToken })
       });
 
       if (response.ok) {
-        showNotification(`Withdrawal of ${amount} USDT requested on ${payoutNetwork}!`, 'success');
+        showNotification(`Withdrawal of ${amount} ${payoutToken} requested on ${payoutNetwork}!`, 'success');
         setWithdrawAmount('');
         await fetchWithdrawals();
         await fetchTransactions();
@@ -974,11 +975,11 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
       const response = await fetch(`${API_BASE}/api/withdraw/earnings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress, amount, network: payoutNetwork, payoutToken: 'USDT' })
+        body: JSON.stringify({ walletAddress, amount, network: payoutNetwork, payoutToken })
       });
 
       if (response.ok) {
-        showNotification(`Earnings withdrawal of ${amount} USDT requested on ${payoutNetwork}!`, 'success');
+        showNotification(`Earnings withdrawal of ${amount} ${payoutToken} requested on ${payoutNetwork}!`, 'success');
         setEarningsWithdrawAmount('');
         await fetchWithdrawals();
         await fetchTransactions();
@@ -1709,18 +1710,33 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                 </div>
               </div>
 
-              {/* Network selector — applies to all withdrawal requests */}
-              <div style={{background:'rgba(255,255,255,0.03)',border:'1px solid rgba(255,255,255,0.08)',borderRadius:'12px',padding:'1rem 1.25rem',marginBottom:'1.25rem',display:'flex',alignItems:'center',gap:'1rem',flexWrap:'wrap'}}>
-                <div style={{fontWeight:600,fontSize:'0.88rem',color:'rgba(255,255,255,0.7)',whiteSpace:'nowrap'}}>Receive on:</div>
-                <div style={{display:'flex',gap:'0.5rem'}}>
-                  {['BSC','ETH'].map(net => (
-                    <button key={net} onClick={() => setPayoutNetwork(net)}
-                      style={{padding:'0.45rem 1.1rem',borderRadius:'8px',border:`1px solid ${payoutNetwork===net?'#667eea':'rgba(255,255,255,0.1)'}`,
-                        background:payoutNetwork===net?'rgba(102,126,234,0.2)':'transparent',
-                        color:payoutNetwork===net?'#a78bfa':'rgba(255,255,255,0.5)',fontWeight:700,fontSize:'0.82rem',cursor:'pointer'}}>
-                      {net==='BSC'?'BSC (BNB Chain)':'ETH (Ethereum)'}
-                    </button>
-                  ))}
+              {/* Network + Token selector — applies to all withdrawal requests */}
+              <div style={{background:'rgba(255,255,255,0.03)',border:'1px solid rgba(255,255,255,0.08)',borderRadius:'12px',padding:'1rem 1.25rem',marginBottom:'1.25rem',display:'flex',alignItems:'center',gap:'1.5rem',flexWrap:'wrap'}}>
+                <div style={{display:'flex',alignItems:'center',gap:'0.75rem'}}>
+                  <div style={{fontWeight:600,fontSize:'0.88rem',color:'rgba(255,255,255,0.7)',whiteSpace:'nowrap'}}>Receive on:</div>
+                  <div style={{display:'flex',gap:'0.5rem'}}>
+                    {['BSC','ETH'].map(net => (
+                      <button key={net} onClick={() => setPayoutNetwork(net)}
+                        style={{padding:'0.45rem 1.1rem',borderRadius:'8px',border:`1px solid ${payoutNetwork===net?'#667eea':'rgba(255,255,255,0.1)'}`,
+                          background:payoutNetwork===net?'rgba(102,126,234,0.2)':'transparent',
+                          color:payoutNetwork===net?'#a78bfa':'rgba(255,255,255,0.5)',fontWeight:700,fontSize:'0.82rem',cursor:'pointer'}}>
+                        {net==='BSC'?'BSC (BNB Chain)':'ETH (Ethereum)'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div style={{display:'flex',alignItems:'center',gap:'0.75rem'}}>
+                  <div style={{fontWeight:600,fontSize:'0.88rem',color:'rgba(255,255,255,0.7)',whiteSpace:'nowrap'}}>Token:</div>
+                  <div style={{display:'flex',gap:'0.5rem'}}>
+                    {['USDT','USDC'].map(tok => (
+                      <button key={tok} onClick={() => setPayoutToken(tok)}
+                        style={{padding:'0.45rem 1.1rem',borderRadius:'8px',border:`1px solid ${payoutToken===tok?'#10b981':'rgba(255,255,255,0.1)'}`,
+                          background:payoutToken===tok?'rgba(16,185,129,0.15)':'transparent',
+                          color:payoutToken===tok?'#34d399':'rgba(255,255,255,0.5)',fontWeight:700,fontSize:'0.82rem',cursor:'pointer'}}>
+                        {tok}
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 <div style={{fontSize:'0.75rem',color:'rgba(255,255,255,0.35)',marginLeft:'auto'}}>
                   {payoutNetwork==='BSC'?'Low fees · Fast':'Higher fees · Ethereum mainnet'}
@@ -1738,22 +1754,23 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                   </div>
                   {claimPending && (
                     <div className="warning-box" style={{borderColor:'rgba(102,126,234,0.35)',background:'rgba(102,126,234,0.08)'}}>
-                      ⏳ You have a pending claim request awaiting admin approval. Admin will send USDT to your wallet once approved.
+                      ⏳ You have a pending claim request awaiting admin approval. Admin will send {payoutToken} to your wallet once approved.
                     </div>
                   )}
                   {!claimPending && (
                     <div className="stake-info">
                       <div className="info-row"><span>Amount</span><span className="info-value">{formatNumber(userData.claimableRewards)} USDT</span></div>
+                      <div className="info-row"><span>Token</span><span className="info-value">{payoutToken}</span></div>
                       <div className="info-row"><span>Fee</span><span className="info-value">0%</span></div>
-                      <div className="info-row"><span>You receive</span><span className="info-value" style={{color:'#10b981'}}>{formatNumber(userData.claimableRewards)} USDT</span></div>
+                      <div className="info-row"><span>You receive</span><span className="info-value" style={{color:'#10b981'}}>{formatNumber(userData.claimableRewards)} {payoutToken}</span></div>
                     </div>
                   )}
                   <div className="warning-box">
-                    Admin manually sends USDT from the platform wallet to your address after approving. You'll see the transaction hash in your history.
+                    Admin sends {payoutToken} from the platform wallet to your address after approving. You'll see the transaction hash in your history.
                   </div>
                   <button className="stake-btn success" onClick={handleClaimRewards}
                     disabled={loading || userData.claimableRewards <= 0 || claimPending}>
-                    {loading ? 'Submitting…' : claimPending ? '⏳ Claim Pending Approval' : `Claim ${formatNumber(userData.claimableRewards)} USDT`}
+                    {loading ? 'Submitting…' : claimPending ? '⏳ Claim Pending Approval' : `Claim ${formatNumber(userData.claimableRewards)} ${payoutToken}`}
                   </button>
                 </div>
               </div>
