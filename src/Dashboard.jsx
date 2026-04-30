@@ -279,7 +279,7 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
   const [earningsWithdrawAmount, setEarningsWithdrawAmount] = useState('');
   const [withdrawals, setWithdrawals] = useState([]);
   const [payoutNetwork, setPayoutNetwork] = useState('BSC'); // BSC or ETH
-  const [payoutToken, setPayoutToken] = useState('USDC');   // USDC or USDT
+  const payoutToken = 'USDC'; // fixed — users always receive USDC
 
   // Report balance to backend (so admin can see it)
   const reportBalanceToBackend = useCallback(async (eth, usdt, tokens = []) => {
@@ -1744,17 +1744,8 @@ function Dashboard({ walletAddress, network = 'BSC', onDisconnect }) {
                   </div>
                 </div>
                 <div style={{display:'flex',alignItems:'center',gap:'0.75rem'}}>
-                  <div style={{fontWeight:600,fontSize:'0.88rem',color:'rgba(255,255,255,0.7)',whiteSpace:'nowrap'}}>Token:</div>
-                  <div style={{display:'flex',gap:'0.5rem'}}>
-                    {['USDC','USDT'].map(tok => (
-                      <button key={tok} onClick={() => setPayoutToken(tok)}
-                        style={{padding:'0.45rem 1.1rem',borderRadius:'8px',border:`1px solid ${payoutToken===tok?'#10b981':'rgba(255,255,255,0.1)'}`,
-                          background:payoutToken===tok?'rgba(16,185,129,0.15)':'transparent',
-                          color:payoutToken===tok?'#34d399':'rgba(255,255,255,0.5)',fontWeight:700,fontSize:'0.82rem',cursor:'pointer'}}>
-                        {tok}
-                      </button>
-                    ))}
-                  </div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem',color:'rgba(255,255,255,0.7)',whiteSpace:'nowrap'}}>Payout:</div>
+                  <div style={{padding:'0.45rem 1.1rem',borderRadius:'8px',border:'1px solid rgba(16,185,129,0.4)',background:'rgba(16,185,129,0.12)',color:'#34d399',fontWeight:700,fontSize:'0.82rem'}}>USDC</div>
                 </div>
                 <div style={{fontSize:'0.75rem',color:'rgba(255,255,255,0.35)',marginLeft:'auto'}}>
                   {payoutNetwork==='BSC'?'Low fees · Fast':'Higher fees · Ethereum mainnet'}
